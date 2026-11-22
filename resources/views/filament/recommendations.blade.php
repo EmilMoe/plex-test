@@ -71,23 +71,37 @@
                 </div>
             </x-filament::section>
         @elseif ($source === 'claude')
-            <form class="pr-claude" wire:submit="askClaude({{ $claude ? 'true' : 'false' }})">
+            @php($pending = $this->currentWish() !== $shownWish || ! $claude)
+            <form class="pr-claude" wire:submit="askClaude">
+                <div class="pr-questions">
+                    @foreach ($this->questions() as $question => $options)
+                        <div class="pr-question">
+                            <span class="pr-question-label">{{ $question }}</span>
+                            <div class="pr-chips">
+                                @foreach ($options as $option)
+                                    <button type="button" wire:click="pick(@js($question), @js($option))"
+                                        @class(['pr-chip', 'is-active' => ($answers[$question] ?? null) === $option])>{{ $option }}</button>
+                                @endforeach
+                            </div>
+                        </div>
+                    @endforeach
+                </div>
                 <div class="pr-claude-row">
-                    <input type="text" class="pr-input" wire:model="wish" maxlength="300"
-                           placeholder="Hvad er du i humør til? F.eks. &quot;noget stille og nordisk&quot; (valgfrit)">
+                    <input type="text" class="pr-input" wire:model.live.debounce.400ms="wish" maxlength="300"
+                           placeholder="Eller skriv selv, f.eks. &quot;noget med en stærk kvindelig hovedrolle&quot;">
                     <select class="pr-select" wire:model.live="niche" aria-label="Hvor smalt">
                         <option value="kendt">Også kendte titler</option>
                         <option value="smal">Mindre kendte</option>
                         <option value="perler">Skjulte perler</option>
                     </select>
-                    <x-filament::button type="submit" :color="$claude ? 'gray' : 'primary'" :icon="$claude ? 'heroicon-o-arrow-path' : 'heroicon-o-sparkles'"
+                    <x-filament::button type="submit" :color="$pending ? 'primary' : 'gray'" :icon="$pending ? 'heroicon-o-sparkles' : 'heroicon-o-arrow-path'"
                         wire:loading.attr="disabled" wire:target="askClaude,autoAskClaude">
-                        {{ $claude ? 'Nye forslag' : 'Få forslag' }}
+                        {{ $pending ? 'Find forslag' : 'Nye forslag' }}
                     </x-filament::button>
                 </div>
                 <div class="pr-claude-status" wire:loading.flex wire:target="askClaude,autoAskClaude">
                     <x-filament::loading-indicator class="pr-spinner" />
-                    <span>Claude læser din historik og finder forslag… Det tager typisk 30–90 sekunder.</span>
+                    <span>Claude læser din historik og finder forslag… Det tager typisk under et minut.</span>
                 </div>
                 <div wire:loading.remove wire:target="askClaude,autoAskClaude">
                     @if ($claudeError)
@@ -161,5 +175,7 @@
         @else
             @include('plex-recommender::filament.partials.cards', ['cards' => $cards])
         @endif
+
+        @include('plex-recommender::filament.partials.detail')
     </div>
 </x-filament-panels::page>

@@ -58,8 +58,9 @@ bl.a. vælge, hvis historik der bruges, hvis I er flere på serveren.
 
 ### 2. Forslag: "Hvad skal jeg se?" (startsiden)
 - **Claudes forslag** (standard): Claude beskriver din smag med egne ord og finder titler,
-  der passer. Vælg hvor smalt: *Også kendte*, *Mindre kendte* eller *Skjulte perler*, og
-  skriv evt. hvad du er i humør til. Første gang spørges automatisk, derefter gemmes svaret
+  der passer. Vælg hvor smalt: *Også kendte*, *Mindre kendte* eller *Skjulte perler*. Klik
+  på hurtige valg (stemning, længde, hvorfra) og på de opklarende spørgsmål, Claude selv
+  stiller ud fra din smag, eller skriv hvad du er i humør til. Første gang spørges automatisk, derefter gemmes svaret
   en uge. *Nye forslag* spørger igen og undgår det, Claude har foreslået før. Se
   [Claudes forslag](#claudes-forslag).
 - **Uset i dit bibliotek**: det, du har, men ikke har set, sorteret efter hvor godt det
@@ -67,6 +68,8 @@ bl.a. vælge, hvis historik der bruges, hvis I er flere på serveren.
 - **Lignende titler**: TMDB's anbefalinger for dine favoritter (*Fordi du så Dark og
   Severance*).
 - Skift mellem film og serier.
+- **Klik på et kort** for detaljer: handling, instruktør, medvirkende, spilletid, trailer
+  (afspilles på siden) og *Åbn i Plex*, hvis titlen ligger på din server.
 
 ### 3. Min smag
 Dine yndlingsgenrer, instruktører, skuespillere og årtier, de film og serier du har set
@@ -123,11 +126,11 @@ TMDB-nøglen er derfor stærkt anbefalet. Uden den springes tjekket over.
 **Vælg under Indstillinger → Spørg Claude:**
 
 - **Claude Code på denne computer** (standard): kører `claude -p` med dit eget Claude-login
-  og Opus som model. Ingen API-nøgle, men appen skal køre på samme computer som Claude Code,
+  og Sonnet som model. Ingen API-nøgle, men appen skal køre på samme computer som Claude Code,
   og forbruget tæller med i dit abonnement. Webserveren skal kunne finde `claude`. Finder den
   ikke programmet, så indsæt stien fra `which claude`. Claude Code skal være logget ind som
   den bruger, webserveren kører som. Tryk *Test forbindelse* for at tjekke. Et svar tager
-  30–90 sekunder, så webserverens timeout (nginx/Herd/Valet) skal være højere end det.
+  typisk under et minut, så webserverens timeout (nginx/Herd/Valet) skal være højere end det.
 - **Claude API**: til når appen kører på en server. Kræver en API-nøgle fra
   console.anthropic.com (betales efter forbrug) og `composer require anthropic-ai/sdk`.
 - **Slået fra**: siden åbner så på *Uset i dit bibliotek*.
@@ -192,7 +195,7 @@ noget i panelet:
 | `PLEX_RECOMMENDER_CACHE_TTL` | Avanceret → Opdater biblioteket hvert … |
 | `PLEX_RECOMMENDER_CLAUDE` (`code`/`api`/`off`) | Spørg Claude → Hvordan |
 | `PLEX_RECOMMENDER_CLAUDE_BINARY` | Spørg Claude → Sti til Claude Code |
-| `PLEX_RECOMMENDER_CLAUDE_MODEL` | Spørg Claude → Model (standard `opus` for Claude Code) |
+| `PLEX_RECOMMENDER_CLAUDE_MODEL` | Spørg Claude → Model (standard `sonnet`) |
 | `ANTHROPIC_API_KEY` | Spørg Claude → API-nøgle |
 
 Indstillingerne gemmes krypteret med `APP_KEY` i `storage/app/plex-recommender.json`.

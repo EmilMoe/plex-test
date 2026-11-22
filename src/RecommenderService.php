@@ -206,7 +206,7 @@ class RecommenderService
                 continue;
             }
             [$score, $why, $breakdown] = $profile->score($item);
-            $candidates[] = [...$item->brief(), 'score' => $score, 'why' => $why, 'breakdown' => $breakdown, 'summary' => mb_substr($item->summary, 0, 300), 'thumb' => $item->thumb];
+            $candidates[] = [...$item->brief(), 'tmdb_id' => $item->tmdbId, 'score' => $score, 'why' => $why, 'breakdown' => $breakdown, 'summary' => mb_substr($item->summary, 0, 300), 'thumb' => $item->thumb];
         }
         usort($candidates, fn ($a, $b) => $b['score'] <=> $a['score']);
 
@@ -283,6 +283,7 @@ class RecommenderService
                 'genres' => array_values(array_filter(array_map(fn ($g) => $genreMap[$g][0] ?? null, $genreIds))),
                 'tmdb_rating' => $rec['vote_average'] ?? null,
                 'votes' => $rec['vote_count'] ?? null,
+                'tmdb_id' => (string) $id,
                 'because_you_watched' => array_slice($seedTitles, 0, 4),
                 'score' => round($score, 3),
                 'breakdown' => [
@@ -300,6 +301,66 @@ class RecommenderService
         usort($results, fn ($a, $b) => $b['score'] <=> $a['score']);
 
         return ['seeds_used' => $usedSeeds, 'recommendations' => array_slice($results, 0, $limit)];
+    }
+
+    /**
+     * Details for a title page/modal: overview, credits, runtime and a YouTube
+     * trailer. Cached as a plain array for a week. Null without a TMDB key.
+     */
+    public function details(string $type, string $tmdbId): ?array
+    {
+        $type = self::normalizeType($type);
+        if (! $tmdb = $this->tmdb()) {
+            return null;
+        }
+
+        return $this->cache->remember("plex-recommender:details:{$type}:{$tmdbId}:".$this->settings->language(), now()->addWeek(), function () use ($tmdb, $type, $tmdbId) {
+            $d = $tmdb->details($type, $tmdbId);
+            $date = $d['release_date'] ?? $d['first_air_date'] ?? '';
+            $videos = array_values(array_filter($d['videos']['results'] ?? [], fn ($v) => ($v['site'] ?? '') === 'YouTube' && ! empty($v['key'])));
+            $lang = substr($this->settings->language(), 0, 2);
+            usort($videos, fn ($a, $b) => [
+                ($b['type'] ?? '') === 'Trailer', ($b['iso_639_1'] ?? '') === $lang, ! empty($b['official']),
+            ] <=> [
+                ($a['type'] ?? '') === 'Trailer', ($a['iso_639_1'] ?? '') === $lang, ! empty($a['official']),
+            ]);
+            $directors = $type === MediaItem::SHOW
+                ? array_column($d['created_by'] ?? [], 'name')
+                : array_column(array_filter($d['credits']['crew'] ?? [], fn ($c) => ($c['job'] ?? '') === 'Director'), 'name');
+
+            return [
+                'tmdb_id' => (string) $tmdbId,
+                'title' => $d['title'] ?? $d['name'] ?? '',
+                'original_title' => $d['original_title'] ?? $d['original_name'] ?? null,
+                'year' => ctype_digit(substr($date, 0, 4)) ? (int) substr($date, 0, 4) : null,
+                'tagline' => $d['tagline'] ?? null,
+                'overview' => $d['overview'] ?? '',
+                'genres' => array_column($d['genres'] ?? [], 'name'),
+                'runtime' => $d['runtime'] ?? (($d['episode_run_time'] ?? [])[0] ?? null),
+                'seasons' => $d['number_of_seasons'] ?? null,
+                'episodes' => $d['number_of_episodes'] ?? null,
+                'countries' => array_column($d['production_countries'] ?? [], 'name') ?: ($d['origin_country'] ?? []),
+                'directors' => array_values(array_unique($directors)),
+                'cast' => array_slice(array_column($d['credits']['cast'] ?? [], 'name'), 0, 8),
+                'tmdb_rating' => $d['vote_average'] ?? null,
+                'votes' => $d['vote_count'] ?? null,
+                'poster' => ! empty($d['poster_path']) ? 'https://image.tmdb.org/t/p/w500'.$d['poster_path'] : null,
+                'backdrop' => ! empty($d['backdrop_path']) ? 'https://image.tmdb.org/t/p/w1280'.$d['backdrop_path'] : null,
+                'trailer' => $videos[0]['key'] ?? null,
+                'url' => 'https://www.themoviedb.org/'.TmdbClient::kind($type)."/{$tmdbId}",
+            ];
+        });
+    }
+
+    /** Link that opens a library item in Plex Web, when the server id is known. */
+    public function plexWebUrl(?string $ratingKey): ?string
+    {
+        $server = $this->settings->get('server_id');
+        if (! $ratingKey || ! $server) {
+            return null;
+        }
+
+        return "https://app.plex.tv/desktop/#!/server/{$server}/details?key=".rawurlencode("/library/metadata/{$ratingKey}");
     }
 
     /**

@@ -73,6 +73,19 @@ class TmdbClient
         return null;
     }
 
+    /** Full details incl. videos (trailers) and credits. */
+    public function details(string $type, string $tmdbId): array
+    {
+        $lang = substr($this->language, 0, 2);
+
+        return $this->get('/'.self::kind($type)."/{$tmdbId}", [
+            'language' => $this->language,
+            'append_to_response' => 'videos,credits',
+            // Trailers are often only in English: accept the user's language, English and neutral.
+            'include_video_language' => implode(',', array_unique([$lang, 'en', 'null'])),
+        ]);
+    }
+
     /** Resolve a TMDB id from an IMDb or TVDB id (for items lacking a tmdb guid). */
     public function findTmdbId(string $type, ?string $imdbId, ?string $tvdbId): ?string
     {

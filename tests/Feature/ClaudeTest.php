@@ -26,13 +26,13 @@ class ClaudeTest extends TestCase
         return ['title' => $title, 'original_title' => null, 'year' => $year, 'director' => 'Nogen', 'country' => 'Danmark', 'reason' => $reason, 'because_you_watched' => ['Arrival']];
     }
 
-    protected function fakeClaude(array $recommendations, string $taste = 'Du kan lide stille, kloge film.'): void
+    protected function fakeClaude(array $recommendations, string $taste = 'Du kan lide stille, kloge film.', array $questions = []): void
     {
         Process::fake([
             '*' => Process::result(json_encode([
                 'type' => 'result',
                 'is_error' => false,
-                'result' => "Her er mine forslag:\n```json\n".json_encode(['taste_summary' => $taste, 'recommendations' => $recommendations])."\n```",
+                'result' => "Her er mine forslag:\n```json\n".json_encode(['taste_summary' => $taste, 'recommendations' => $recommendations, 'questions' => $questions])."\n```",
             ])),
         ]);
     }
@@ -63,7 +63,7 @@ class ClaudeTest extends TestCase
         Process::assertRan(function (PendingProcess $process) {
             $this->assertSame(PHP_BINARY, $process->command[0]);
             $this->assertContains('--system-prompt', $process->command); // replaces Claude Code's coding prompt
-            $this->assertSame('opus', $process->command[array_search('--model', $process->command) + 1]);
+            $this->assertSame('sonnet', $process->command[array_search('--model', $process->command) + 1]);
             $this->assertStringContainsString('noget med rumskibe', $process->input);
             $this->assertStringContainsString('Blade Runner 2049', $process->input); // favourite / seen
             $this->assertStringNotContainsString('Love Actually', $process->input); // library isn't sent anymore
@@ -144,7 +144,8 @@ class ClaudeTest extends TestCase
         Livewire::test(Recommendations::class)
             ->assertSet('source', 'claude')
             ->call('load')
-            ->assertSee('Få forslag')
+            ->assertSee('Find forslag')
+            ->assertSee('Stemning')
             ->call('autoAskClaude')
             ->assertSee('Hævnen')
             ->assertSee('Samme moralske tyngde som Arrival.')
@@ -153,6 +154,51 @@ class ClaudeTest extends TestCase
             ->call('autoAskClaude'); // cached now: no second run
 
         Process::assertRanTimes(fn () => true, 1);
+    }
+
+    public function test_quick_questions_and_claudes_follow_ups_shape_the_wish(): void
+    {
+        Filament::setCurrentPanel('admin');
+        $this->fakeClaude([$this->rec('Hævnen', 2010)], 'x', [
+            ['question' => 'Gerne sort/hvid?', 'options' => ['Ja', 'Nej']],
+            ['question' => 'Stemning', 'options' => ['Dup', 'Dup2']], // duplicate of a base question: dropped
+        ]);
+
+        $page = Livewire::test(Recommendations::class)
+            ->call('load')
+            ->call('autoAskClaude')
+            ->assertSee('Gerne sort/hvid?')
+            ->assertSee('Nye forslag')
+            ->call('pick', 'Stemning', 'Rørende')
+            ->call('pick', 'Gerne sort/hvid?', 'Ja')
+            ->set('wish', 'noget med heste')
+            ->assertSee('Find forslag')
+            ->call('askClaude')
+            ->assertSet('shownWish', 'noget med heste. Stemning: Rørende. Gerne sort/hvid?: Ja');
+
+        Process::assertRan(fn (PendingProcess $p) => str_contains($p->input, 'Mit ønske lige nu (vægt det højt): noget med heste. Stemning: Rørende'));
+        $this->assertSame(['Gerne sort/hvid?' => ['Ja', 'Nej']], $this->advisor()->cached('movie')['questions']);
+
+        // Toggling the same chip again removes it.
+        $page->call('pick', 'Stemning', 'Rørende')->assertSet('answers', ['Gerne sort/hvid?' => 'Ja']);
+    }
+
+    public function test_clicking_a_card_opens_details_with_trailer(): void
+    {
+        Filament::setCurrentPanel('admin');
+        $this->fakeClaude([$this->rec('Hævnen', 2010, 'Samme moralske tyngde.')]);
+
+        Livewire::test(Recommendations::class)
+            ->call('load')
+            ->call('autoAskClaude')
+            ->call('openDetail', 0)
+            ->assertDispatched('open-modal', id: 'pr-detail')
+            ->assertSet('detail.trailer', 'trailerDA') // Danish official trailer preferred over English teaser
+            ->assertSet('detail.directors', ['Susanne Bier'])
+            ->assertSee('Se trailer')
+            ->assertSee('To drenge og deres fædre.')
+            ->assertSee('Samme moralske tyngde.')
+            ->assertSee('1 t 53 min');
     }
 
     public function test_falls_back_to_library_tab_when_claude_is_off(): void

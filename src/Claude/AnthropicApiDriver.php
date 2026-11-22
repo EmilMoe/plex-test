@@ -36,7 +36,7 @@ class AnthropicApiDriver implements ClaudeDriver
         try {
             $client = new Client(apiKey: $this->apiKey);
             $message = $client->messages->create(
-                model: $this->model ?: 'claude-opus-5-5',
+                model: $this->model ?: 'claude-sonnet-5-5',
                 maxTokens: 16000,
                 system: $system,
                 messages: [['role' => 'user', 'content' => $prompt]],

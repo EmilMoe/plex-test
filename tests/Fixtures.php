@@ -99,6 +99,17 @@ class Fixtures
             },
             'api.themoviedb.org/3/find/*' => Http::response(['movie_results' => [], 'tv_results' => []]),
             'api.themoviedb.org/3/tv/*/recommendations*' => Http::response(['total_pages' => 1, 'results' => []]),
+            'api.themoviedb.org/3/movie/*' => Http::response([
+                'id' => 3, 'title' => 'Hævnen', 'original_title' => 'Hævnen', 'release_date' => '2010-08-26',
+                'tagline' => 'Et lille drama', 'overview' => 'To drenge og deres fædre.', 'runtime' => 113,
+                'genres' => [['id' => 18, 'name' => 'Drama']], 'production_countries' => [['name' => 'Danmark']],
+                'vote_average' => 7.3, 'vote_count' => 900, 'poster_path' => '/h.jpg', 'backdrop_path' => '/hb.jpg',
+                'credits' => ['crew' => [['job' => 'Director', 'name' => 'Susanne Bier']], 'cast' => [['name' => 'Mikael Persbrandt']]],
+                'videos' => ['results' => [
+                    ['site' => 'YouTube', 'key' => 'teaser1', 'type' => 'Teaser', 'iso_639_1' => 'en'],
+                    ['site' => 'YouTube', 'key' => 'trailerDA', 'type' => 'Trailer', 'iso_639_1' => 'da', 'official' => true],
+                ]],
+            ]),
         ];
     }
 }

@@ -58,14 +58,22 @@ class Recommendations extends Page
     public ?string $error = null;
 
     /** Free-text wish for Claude, e.g. "noget let og sjovt". */
-    #[UrlAttribute(as: 'onske')]
     public string $wish = '';
+
+    /** Picked answers to the quick questions: question => option. */
+    public array $answers = [];
+
+    /** The wish (text + answers) behind the suggestions currently shown. */
+    public string $shownWish = '';
 
     public ?string $claudeError = null;
 
     /** How niche Claude's suggestions should be: kendt | smal | perler. */
     #[UrlAttribute(as: 'smal')]
     public string $niche = 'smal';
+
+    /** Data for the title modal. */
+    public ?array $detail = null;
 
     public function mount(): void
     {
@@ -75,15 +83,48 @@ class Recommendations extends Page
         }
     }
 
+    public function updatedType(): void
+    {
+        $this->genre = null;
+        $this->answers = []; // the questions differ between movies and shows
+    }
+
+    /** Toggle an answer chip. */
+    public function pick(string $question, string $option): void
+    {
+        if (($this->answers[$question] ?? null) === $option) {
+            unset($this->answers[$question]);
+        } else {
+            $this->answers[$question] = $option;
+        }
+    }
+
+    /** Typed wish + picked answers, as sent to Claude. */
+    public function currentWish(): string
+    {
+        $parts = array_map(fn ($q, $a) => "{$q}: {$a}", array_keys($this->answers), $this->answers);
+        if (trim($this->wish) !== '') {
+            array_unshift($parts, trim($this->wish));
+        }
+
+        return implode('. ', $parts);
+    }
+
     /** Ask Claude (slow: runs Claude Code or calls the API). Result is cached. */
-    public function askClaude(bool $fresh = false): void
+    public function askClaude(): void
     {
         @set_time_limit(300);
         $this->claudeError = null;
-        $result = app(ClaudeAdvisor::class)->recommend($this->type, $this->wish, $this->niche, 12, $fresh);
+        $wish = $this->currentWish();
+        // Same wish as what's shown = "give me new ones"; a new wish may already be cached.
+        $fresh = $wish === $this->shownWish && $this->claudeResult() !== null;
+        $result = app(ClaudeAdvisor::class)->recommend($this->type, $wish, $this->niche, 12, $fresh);
         if (isset($result['error'])) {
             $this->claudeError = $result['error'];
+
+            return;
         }
+        $this->shownWish = $wish;
     }
 
     public function claudeEnabled(): bool
@@ -91,14 +132,48 @@ class Recommendations extends Page
         return app(ClaudeAdvisor::class)->enabled();
     }
 
-    /** Cached Claude answer for the current type + wish, or null if not asked yet. */
+    /** Cached Claude answer for what's shown, or null if not asked yet. */
     public function claudeResult(): ?array
     {
         if (! $this->ready || ! $this->isConnected()) {
             return null;
         }
 
-        return app(ClaudeAdvisor::class)->cached($this->type, $this->wish, $this->niche);
+        return app(ClaudeAdvisor::class)->cached($this->type, $this->shownWish, $this->niche);
+    }
+
+    /** Base questions + Claude's follow-up questions from the last answer. */
+    public function questions(): array
+    {
+        return [...ClaudeAdvisor::baseQuestions($this->type), ...($this->claudeResult()['questions'] ?? [])];
+    }
+
+    /** Open the title modal for card number $index. */
+    public function openDetail(int $index): void
+    {
+        $card = $this->cards()[$index] ?? null;
+        if (! $card) {
+            return;
+        }
+        $svc = app(RecommenderService::class);
+        $details = null;
+        if (! empty($card['tmdb_id'])) {
+            try {
+                $details = $svc->details($this->type, (string) $card['tmdb_id']);
+            } catch (Throwable) {
+                // TMDB down: show what the card knows
+            }
+        }
+
+        $this->detail = [
+            ...$card,
+            ...array_filter($details ?? [], fn ($v) => $v !== null && $v !== [] && $v !== ''),
+            'poster' => $details['poster'] ?? $card['poster'],
+            'reasons' => $card['reasons'],
+            'plex_url' => $svc->plexWebUrl($card['rating_key'] ?? null),
+            'has_details' => $details !== null,
+        ];
+        $this->dispatch('open-modal', id: 'pr-detail');
     }
 
     public function getSubheading(): ?string
@@ -128,17 +203,11 @@ class Recommendations extends Page
     /** First visit without a saved answer: ask Claude right away (called from the view). */
     public function autoAskClaude(): void
     {
-        if ($this->source === 'claude' && $this->isConnected() && $this->claudeEnabled() && ! $this->claudeResult() && ! $this->wish) {
+        if ($this->source === 'claude' && $this->isConnected() && $this->claudeEnabled() && ! $this->claudeResult() && $this->shownWish === '' && $this->currentWish() === '') {
             $this->askClaude();
         }
     }
 
-    public function updated(string $property): void
-    {
-        if ($property === 'type') {
-            $this->genre = null;
-        }
-    }
 
     public function isConnected(): bool
     {
@@ -181,6 +250,9 @@ class Recommendations extends Page
                     'url' => $r['url'] ?? 'https://www.themoviedb.org/search?query='.rawurlencode($r['title']),
                     'score' => null,
                     'why' => [],
+                    'tmdb_id' => $r['tmdb_id'] ?? null,
+                    'in_library' => $r['in_library'],
+                    'rating_key' => $r['rating_key'],
                 ], $this->claudeResult()['recommendations'] ?? []);
             }
 
@@ -201,6 +273,9 @@ class Recommendations extends Page
                     'url' => $r['url'],
                     'score' => $r['score'],
                     'why' => $this->newBreakdown($r),
+                    'tmdb_id' => $r['tmdb_id'] ?? null,
+                    'in_library' => false,
+                    'rating_key' => null,
                 ], $result['recommendations']);
             }
 
@@ -215,6 +290,9 @@ class Recommendations extends Page
                 'url' => null,
                 'progress' => $r['type'] === MediaItem::SHOW && ($r['status'] ?? '') === 'in_progress' ? $r['episodes_watched'] : null,
                 'score' => $r['score'],
+                'tmdb_id' => $r['tmdb_id'] ?? null,
+                'in_library' => true,
+                'rating_key' => $r['rating_key'],
                 'why' => array_map(fn ($p) => [
                     'label' => $p['label'],
                     'detail' => $p['detail'],

@@ -64,7 +64,7 @@ return [
         'driver' => env('PLEX_RECOMMENDER_CLAUDE', 'code'),
         // Navn eller fuld sti til claude-programmet (find den med `which claude`).
         'binary' => env('PLEX_RECOMMENDER_CLAUDE_BINARY', 'claude'),
-        // Tom = Claude Codes standardmodel (eller claude-opus-5-5 for API).
+        // Tom = sonnet (Claude Code) / claude-sonnet-5-5 (API). Hurtig og god nok til forslag.
         'model' => env('PLEX_RECOMMENDER_CLAUDE_MODEL'),
         'api_key' => env('ANTHROPIC_API_KEY'),
     ],

@@ -41,6 +41,20 @@ class ClaudeAdvisor
                 'type' => 'string',
                 'description' => '2-3 sætninger på dansk, i du-form: hvad kendetegner brugerens smag (tone, temaer, tempo, stil, lande) – ikke bare genrer',
             ],
+            'questions' => [
+                'type' => 'array',
+                'description' => '2-3 korte opklarende spørgsmål med 2-4 svarmuligheder, tilpasset netop denne brugers smag, der kan hjælpe med at ramme bedre næste gang. '
+                    .'Spørg IKKE om stemning, længde eller land (det spørges der allerede om).',
+                'items' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'question' => ['type' => 'string'],
+                        'options' => ['type' => 'array', 'items' => ['type' => 'string']],
+                    ],
+                    'required' => ['question', 'options'],
+                    'additionalProperties' => false,
+                ],
+            ],
             'recommendations' => [
                 'type' => 'array',
                 'items' => [
@@ -59,9 +73,25 @@ class ClaudeAdvisor
                 ],
             ],
         ],
-        'required' => ['taste_summary', 'recommendations'],
+        'required' => ['taste_summary', 'recommendations', 'questions'],
         'additionalProperties' => false,
     ];
+
+    /**
+     * Quick questions that are always offered, before Claude's own follow-ups.
+     *
+     * @return array<string, list<string>>
+     */
+    public static function baseQuestions(string $type): array
+    {
+        return [
+            'Stemning' => ['Let og sjov', 'Spændende', 'Tankevækkende', 'Mørk og tung', 'Rørende', 'Skæv og anderledes'],
+            ...($type === MediaItem::SHOW
+                ? ['Omfang' => ['Miniserie', 'Et par sæsoner', 'Gerne mange sæsoner']]
+                : ['Længde' => ['Under 1½ time', 'Gerne lang']]),
+            'Hvorfra' => ['Dansk/nordisk', 'Europæisk', 'Asiatisk', 'Amerikansk'],
+        ];
+    }
 
     /** Answers are kept this long; "Spørg igen" always asks fresh. */
     public const CACHE_DAYS = 7;
@@ -80,7 +110,7 @@ class ClaudeAdvisor
         }
 
         return match ($this->settings->claudeDriver()) {
-            'code' => new ClaudeCodeDriver($this->settings->claudeBinary(), $this->settings->claudeModel() ?? 'opus'),
+            'code' => new ClaudeCodeDriver($this->settings->claudeBinary(), $this->settings->claudeModel() ?? 'sonnet'),
             'api' => ($key = $this->settings->anthropicApiKey()) ? new AnthropicApiDriver($key, $this->settings->claudeModel()) : null,
             default => null,
         };
@@ -134,6 +164,7 @@ class ClaudeAdvisor
 
         $result = [
             'taste_summary' => (string) ($data['taste_summary'] ?? ''),
+            'questions' => self::cleanQuestions($data['questions'] ?? [], $type),
             'recommendations' => array_slice($recs, 0, $limit),
             'driver' => $driver->label(),
             'asked_at' => time(),
@@ -284,6 +315,8 @@ class ClaudeAdvisor
         - Variér: ikke flere titler af samme instruktør, og gerne forskellige lande og årtier.
         - Begrundelsen skal nævne konkrete fællestræk med titler brugeren har set (f.eks. "samme kolde, nordiske tone som Dark"),
           ikke generiske vendinger som "du kan lide drama". Dansk, højst 2 sætninger.
+        - Stil til sidst 2-3 korte opklarende spørgsmål (questions), som ville hjælpe dig med at ramme endnu bedre næste gang,
+          f.eks. om et tema, en periode eller en stil du ser i historikken. Svarmulighederne skal være korte.
         - Svar kun med JSON efter det givne schema.
         TXT;
     }
@@ -334,13 +367,28 @@ class ClaudeAdvisor
         return implode("\n\n", array_filter([
             "Find {$count} {$kind} til mig.",
             'Hvor smalt: '.self::NICHE[$niche][0],
-            $wish ? "Mit ønske lige nu: {$wish}" : null,
+            $wish ? "Mit ønske lige nu (vægt det højt): {$wish}" : null,
             "## Set for nylig (sidste 90 dage)\n".($recent ? implode("\n", $recent) : '–'),
             "## Mine favoritter (mest engagerede først)\n".(implode("\n", $favorites) ?: '–'),
             $disliked ? "## Det brød jeg mig ikke om (lav bedømmelse eller droppet hurtigt)\n".implode("\n", $disliked) : null,
             "## Allerede set (foreslå IKKE)\n".(implode('; ', $seen) ?: '–'),
             $before ? "## Foreslået før (gentag IKKE)\n".implode('; ', $before) : null,
         ]));
+    }
+
+    /** @return array<string, list<string>> Claude's follow-up questions, without duplicates of the base questions. */
+    protected static function cleanQuestions(mixed $questions, string $type): array
+    {
+        $out = [];
+        foreach (is_array($questions) ? $questions : [] as $q) {
+            $question = trim((string) ($q['question'] ?? ''));
+            $options = array_values(array_unique(array_filter(array_map(fn ($o) => trim((string) $o), (array) ($q['options'] ?? [])))));
+            if ($question !== '' && count($options) >= 2 && ! isset(self::baseQuestions($type)[$question])) {
+                $out[mb_substr($question, 0, 120)] = array_slice(array_map(fn ($o) => mb_substr($o, 0, 60), $options), 0, 4);
+            }
+        }
+
+        return array_slice($out, 0, 3, true);
     }
 
     /** Parse JSON from a model answer, tolerating code fences or text around it. */

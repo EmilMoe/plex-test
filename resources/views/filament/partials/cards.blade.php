@@ -1,6 +1,7 @@
 <div class="pr-grid" wire:loading.class="pr-dim" wire:target="type,source,genre,niche">
-    @foreach ($cards as $card)
-        <article class="pr-card">
+    @foreach ($cards as $i => $card)
+        <article class="pr-card is-clickable" wire:click="openDetail({{ $i }})" wire:key="card-{{ $source }}-{{ $type }}-{{ $i }}"
+            role="button" tabindex="0" x-on:keydown.enter="$wire.openDetail({{ $i }})" aria-label="Vis detaljer for {{ $card['title'] }}">
             <div class="pr-poster">
                 <span class="pr-poster-fallback">{{ mb_substr($card['title'], 0, 1) }}</span>
                 @if ($card['poster'])
@@ -14,13 +15,7 @@
                 @endif
             </div>
             <div class="pr-body">
-                <h3 class="pr-title">
-                    @if ($card['url'])
-                        <a href="{{ $card['url'] }}" target="_blank" rel="noopener">{{ $card['title'] }}</a>
-                    @else
-                        {{ $card['title'] }}
-                    @endif
-                </h3>
+                <h3 class="pr-title">{{ $card['title'] }}</h3>
                 <p class="pr-meta">{{ collect([$card['year'], implode(', ', array_slice($card['genres'], 0, 2))])->filter()->implode(' · ') }}</p>
                 @foreach ($card['reasons'] as $reason)
                     <p class="pr-reason">{{ $reason }}</p>
@@ -29,7 +24,7 @@
                     <p class="pr-summary">{{ $card['summary'] }}</p>
                 @endif
                 @if (! empty($card['why']))
-                    <details class="pr-why">
+                    <details class="pr-why" x-on:click.stop x-on:keydown.enter.stop>
                         <summary>Hvorfor? <span class="pr-score">{{ number_format($card['score'], 2, ',', '') }} point</span></summary>
                         <dl class="pr-why-list">
                             @foreach ($card['why'] as $row)
