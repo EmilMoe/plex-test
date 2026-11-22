@@ -2,6 +2,7 @@
 
 namespace EmilMoe\PlexRecommender\Claude;
 
+use EmilMoe\PlexRecommender\Clients\TmdbClient;
 use EmilMoe\PlexRecommender\Data\MediaItem;
 use EmilMoe\PlexRecommender\RecommenderService;
 use EmilMoe\PlexRecommender\Settings;
@@ -9,33 +10,61 @@ use Illuminate\Contracts\Cache\Repository as Cache;
 use Throwable;
 
 /**
- * Asks Claude for recommendations based on the taste profile and watch
- * history, then checks every suggestion against the Plex library.
+ * Asks Claude for personal recommendations: first a description of the user's
+ * taste in words, then titles that fit it. Every suggestion is verified on TMDB
+ * (drops invented titles, enforces "how niche"), and checked against the library.
  */
 class ClaudeAdvisor
 {
+    /** How niche the suggestions should be => [prompt text, max TMDB votes movie, max TMDB votes tv]. */
+    public const NICHE = [
+        'kendt' => [
+            'Gerne anerkendte titler, også kendte, så længe de passer præcist til smagen.',
+            null, null,
+        ],
+        'smal' => [
+            'Mindre kendte titler: arthouse, internationale film, festivalfilm, oversete titler fra alle årtier. '
+            .'Undgå store Hollywood-produktioner og titler "alle" har set eller hørt om.',
+            8000, 3000,
+        ],
+        'perler' => [
+            'Virkelig skjulte perler som de færreste har hørt om: små festivalfilm, debutfilm, glemte ældre titler, '
+            .'film fra mindre filmlande. Ingen titler der har været store hits, heller ikke kult-hits.',
+            1500, 600,
+        ],
+    ];
+
     public const SCHEMA = [
         'type' => 'object',
         'properties' => [
+            'taste_summary' => [
+                'type' => 'string',
+                'description' => '2-3 sætninger på dansk, i du-form: hvad kendetegner brugerens smag (tone, temaer, tempo, stil, lande) – ikke bare genrer',
+            ],
             'recommendations' => [
                 'type' => 'array',
                 'items' => [
                     'type' => 'object',
                     'properties' => [
-                        'title' => ['type' => 'string', 'description' => 'Titel som den kendes i Danmark'],
+                        'title' => ['type' => 'string', 'description' => 'Titlen som den kendes i Danmark'],
                         'original_title' => ['type' => ['string', 'null']],
                         'year' => ['type' => ['integer', 'null']],
-                        'reason' => ['type' => 'string', 'description' => '1-2 sætninger på dansk: hvorfor netop denne bruger vil kunne lide den'],
+                        'director' => ['type' => ['string', 'null']],
+                        'country' => ['type' => ['string', 'null']],
+                        'reason' => ['type' => 'string', 'description' => '1-2 sætninger på dansk med konkrete fællestræk med brugerens favoritter'],
                         'because_you_watched' => ['type' => 'array', 'items' => ['type' => 'string']],
                     ],
-                    'required' => ['title', 'original_title', 'year', 'reason', 'because_you_watched'],
+                    'required' => ['title', 'original_title', 'year', 'director', 'country', 'reason', 'because_you_watched'],
                     'additionalProperties' => false,
                 ],
             ],
         ],
-        'required' => ['recommendations'],
+        'required' => ['taste_summary', 'recommendations'],
         'additionalProperties' => false,
     ];
+
+    /** Answers are kept this long; "Spørg igen" always asks fresh. */
+    public const CACHE_DAYS = 7;
 
     public function __construct(
         protected RecommenderService $svc,
@@ -51,7 +80,7 @@ class ClaudeAdvisor
         }
 
         return match ($this->settings->claudeDriver()) {
-            'code' => new ClaudeCodeDriver($this->settings->claudeBinary(), $this->settings->claudeModel()),
+            'code' => new ClaudeCodeDriver($this->settings->claudeBinary(), $this->settings->claudeModel() ?? 'opus'),
             'api' => ($key = $this->settings->anthropicApiKey()) ? new AnthropicApiDriver($key, $this->settings->claudeModel()) : null,
             default => null,
         };
@@ -62,28 +91,36 @@ class ClaudeAdvisor
         return $this->driver() !== null;
     }
 
-    /** Previously fetched answer for these inputs, without calling Claude. */
-    public function cached(string $type, ?string $wish = null): ?array
+    public static function niche(?string $niche): string
     {
-        return $this->cache->get($this->cacheKey($type, $wish));
+        return isset(self::NICHE[$niche]) ? $niche : 'smal';
+    }
+
+    /** Previously fetched answer for these inputs, without calling Claude. */
+    public function cached(string $type, ?string $wish = null, ?string $niche = null): ?array
+    {
+        return $this->cache->get($this->cacheKey(RecommenderService::normalizeType($type), $this->cleanWish($wish), self::niche($niche)));
     }
 
     /**
-     * @return array{recommendations: list<array>, driver: string, asked_at: int}|array{error: string}
+     * @return array{taste_summary: string, recommendations: list<array>, driver: string, asked_at: int, niche: string, filtered: array}|array{error: string}
      */
-    public function recommend(string $type, ?string $wish = null, int $limit = 12, bool $fresh = false): array
+    public function recommend(string $type, ?string $wish = null, ?string $niche = null, int $limit = 12, bool $fresh = false): array
     {
         $type = RecommenderService::normalizeType($type);
-        $wish = trim((string) $wish) ?: null;
+        $wish = $this->cleanWish($wish);
+        $niche = self::niche($niche);
+
         if (! $driver = $this->driver()) {
             return ['error' => 'Claude er ikke sat op. Vælg Claude Code eller indsæt en API-nøgle under Plex-indstillinger.'];
         }
-        if (! $fresh && ($hit = $this->cached($type, $wish))) {
+        if (! $fresh && ($hit = $this->cached($type, $wish, $niche))) {
             return $hit;
         }
 
         try {
-            $text = $driver->ask($this->systemPrompt(), $this->prompt($type, $wish, $limit), self::SCHEMA);
+            // Ask for extra titles: some are dropped as seen, too popular or not found.
+            $text = $driver->ask($this->systemPrompt(), $this->prompt($type, $wish, $niche, $limit + 8), self::SCHEMA);
         } catch (ClaudeException $e) {
             return ['error' => $e->getMessage()];
         }
@@ -93,43 +130,119 @@ class ClaudeAdvisor
             return ['error' => 'Kunne ikke forstå svaret fra Claude. Prøv igen.'];
         }
 
-        $recs = array_values(array_filter($data['recommendations'], fn ($r) => is_array($r) && ! empty($r['title'])));
-        $owned = $this->svc->checkOwned(array_map(
-            fn ($r) => ! empty($r['year']) ? "{$r['title']} ({$r['year']})" : $r['title'],
-            $recs,
-        ));
+        [$recs, $filtered] = $this->verify($type, $niche, $data['recommendations']);
 
-        $out = [];
-        foreach ($recs as $i => $r) {
-            $o = $owned[$i] ?? ['in_library' => false];
-            // Also try the original title if the Danish one didn't match.
-            if (! $o['in_library'] && ! empty($r['original_title']) && $r['original_title'] !== $r['title']) {
-                $o = $this->svc->checkOwned([! empty($r['year']) ? "{$r['original_title']} ({$r['year']})" : $r['original_title']])[0];
+        $result = [
+            'taste_summary' => (string) ($data['taste_summary'] ?? ''),
+            'recommendations' => array_slice($recs, 0, $limit),
+            'driver' => $driver->label(),
+            'asked_at' => time(),
+            'niche' => $niche,
+            'filtered' => $filtered,
+        ];
+        $this->cache->put($this->cacheKey($type, $wish, $niche), $result, now()->addDays(self::CACHE_DAYS));
+        $this->remember($type, array_column($result['recommendations'], 'title'));
+
+        return $result;
+    }
+
+    /**
+     * Drop what's seen, invented or too popular; enrich the rest with TMDB data.
+     *
+     * @return array{0: list<array>, 1: array{seen: int, popular: int, not_found: int}}
+     */
+    protected function verify(string $type, string $niche, array $raw): array
+    {
+        $tmdb = $this->svc->tmdb();
+        $maxVotes = self::NICHE[$niche][$type === MediaItem::SHOW ? 2 : 1];
+        $filtered = ['seen' => 0, 'popular' => 0, 'not_found' => 0];
+
+        $byTmdb = [];
+        foreach ($this->svc->items($type) as $item) {
+            if ($item->tmdbId) {
+                $byTmdb[$item->tmdbId] = $item;
             }
-            if (($o['status'] ?? null) === 'watched') {
-                continue; // Claude didn't know you've seen it
+        }
+
+        $out = $seenTitles = [];
+        foreach ($raw as $r) {
+            if (! is_array($r) || empty($r['title'])) {
+                continue;
             }
+            $title = (string) $r['title'];
+            $orig = ! empty($r['original_title']) && $r['original_title'] !== $title ? (string) $r['original_title'] : null;
+            $year = isset($r['year']) && is_numeric($r['year']) ? (int) $r['year'] : null;
+
+            $match = null;
+            if ($tmdb) {
+                try {
+                    foreach (array_filter([$orig, $title]) as $t) {
+                        if ($match = $tmdb->search($type, $t, $year)) {
+                            break;
+                        }
+                    }
+                } catch (Throwable) {
+                    $tmdb = null; // TMDB unavailable: skip verification for the rest
+                }
+                if ($tmdb && ! $match) {
+                    $filtered['not_found']++;
+
+                    continue;
+                }
+            }
+
+            // Library check: by TMDB id when we have it, otherwise by title.
+            $owned = $match && isset($byTmdb[(string) $match['id']]) ? $byTmdb[(string) $match['id']] : null;
+            $status = $owned?->status();
+            $inLibrary = (bool) $owned;
+            if (! $owned) {
+                $o = $this->svc->checkOwned([$year ? "{$title} ({$year})" : $title])[0];
+                if (! $o['in_library'] && $orig) {
+                    $o = $this->svc->checkOwned([$year ? "{$orig} ({$year})" : $orig])[0];
+                }
+                $inLibrary = $o['in_library'];
+                $status = $o['status'] ?? null;
+            }
+            if ($status === 'watched') {
+                $filtered['seen']++;
+
+                continue;
+            }
+
+            if ($match && $maxVotes !== null && ($match['vote_count'] ?? 0) > $maxVotes) {
+                $filtered['popular']++;
+
+                continue;
+            }
+
+            $key = $match ? 'tmdb:'.$match['id'] : mb_strtolower($title).'|'.$year;
+            if (isset($seenTitles[$key])) {
+                continue;
+            }
+            $seenTitles[$key] = true;
+
+            $date = $match['release_date'] ?? $match['first_air_date'] ?? '';
             $out[] = [
-                'title' => (string) $r['title'],
-                'original_title' => ! empty($r['original_title']) && $r['original_title'] !== $r['title'] ? (string) $r['original_title'] : null,
-                'year' => isset($r['year']) && is_numeric($r['year']) ? (int) $r['year'] : null,
+                'title' => $match ? ($match['title'] ?? $match['name'] ?? $title) : $title,
+                'original_title' => $orig,
+                'year' => ctype_digit(substr($date, 0, 4)) ? (int) substr($date, 0, 4) : $year,
+                'director' => $r['director'] ?? null,
+                'country' => $r['country'] ?? null,
                 'reason' => (string) ($r['reason'] ?? ''),
                 'because_you_watched' => array_values(array_filter((array) ($r['because_you_watched'] ?? []), 'is_string')),
-                'in_library' => (bool) $o['in_library'],
-                'status' => $o['status'] ?? null,
-                'rating_key' => $o['rating_key'] ?? null,
-                'genres' => $o['genres'] ?? [],
+                'in_library' => $inLibrary,
+                'status' => $status,
+                'rating_key' => $owned?->ratingKey,
+                'tmdb_id' => $match['id'] ?? null,
+                'tmdb_rating' => $match['vote_average'] ?? null,
+                'votes' => $match['vote_count'] ?? null,
+                'overview' => mb_substr((string) ($match['overview'] ?? ''), 0, 400),
+                'poster' => ! empty($match['poster_path']) ? 'https://image.tmdb.org/t/p/w342'.$match['poster_path'] : null,
+                'url' => $match ? 'https://www.themoviedb.org/'.TmdbClient::kind($type).'/'.$match['id'] : null,
             ];
         }
 
-        $result = [
-            'recommendations' => array_slice($out, 0, $limit),
-            'driver' => $driver->label(),
-            'asked_at' => time(),
-        ];
-        $this->cache->put($this->cacheKey($type, $wish), $result, now()->addHours(12));
-
-        return $result;
+        return [$out, $filtered];
     }
 
     /** Quick round trip to check the setup works. Returns the driver label. */
@@ -154,60 +267,80 @@ class ClaudeAdvisor
     public function systemPrompt(): string
     {
         return <<<'TXT'
-        Du er en filmkender der giver personlige anbefalinger til en dansk bruger ud fra deres Plex-historik.
-        - Vægt det brugeren har set for nylig højest. Gamle favoritter er baggrund, ikke hovedsagen.
-        - Foreslå aldrig noget brugeren allerede har set (se listen).
-        - Bland gerne titler fra brugerens eget bibliotek (usete) med titler de ikke har.
-        - Undgå de mest oplagte valg, hvis de allerede er populære i brugerens genrer; vis lidt bredde.
-        - Begrundelsen skal være konkret og personlig (nævn hvad i historikken der peger på titlen), på dansk, højst 2 sætninger.
+        Du er en passioneret filmkender med bred viden om verdensfilm, festivalfilm og tv fra hele verden. Du giver personlige
+        anbefalinger til én dansk bruger ud fra deres Plex-historik. Du skal finde det, algoritmerne hos streamingtjenesterne
+        ikke finder.
+
+        Sådan arbejder du:
+        1. Læs favoritterne, det brugeren har set for nylig, og det de ikke brød sig om. Find det der faktisk forbinder
+           favoritterne: tone, stemning, temaer, tempo, fortælleform, visuel stil, lande og perioder. Genrer alene er for groft.
+        2. Beskriv smagen kort i taste_summary.
+        3. Find titler der rammer den beskrivelse præcist, i den grad af "smalhed" brugeren beder om.
+
+        Regler:
+        - Det brugeren har set for nylig vejer mest. Gamle favoritter er baggrund.
+        - Foreslå aldrig noget fra listerne "Allerede set" eller "Foreslået før".
+        - Kun titler der findes i virkeligheden. Er du i tvivl om en titel eller dens årstal, så vælg en anden.
+        - Variér: ikke flere titler af samme instruktør, og gerne forskellige lande og årtier.
+        - Begrundelsen skal nævne konkrete fællestræk med titler brugeren har set (f.eks. "samme kolde, nordiske tone som Dark"),
+          ikke generiske vendinger som "du kan lide drama". Dansk, højst 2 sætninger.
+        - Svar kun med JSON efter det givne schema.
         TXT;
     }
 
-    public function prompt(string $type, ?string $wish, int $limit): string
+    public function prompt(string $type, ?string $wish, string $niche, int $count): string
     {
         $kind = $type === MediaItem::SHOW ? 'serier' : 'film';
         $items = $this->svc->items($type);
         $profile = $this->svc->profile($type);
-        $summary = $profile->summary(10);
 
-        $fmt = fn (array $rows) => implode(', ', array_map(fn ($r) => $r['name'].' ('.$r['weight'].')', $rows)) ?: '–';
-        $label = fn (MediaItem $i) => $i->label().($i->lastViewedAt ? ', sidst set '.date('Y-m-d', $i->lastViewedAt) : '')
-            .($i->type === MediaItem::SHOW ? ", {$i->viewedLeafCount}/{$i->leafCount} afsnit" : ($i->viewCount > 1 ? ", set {$i->viewCount} gange" : ''))
-            .($i->userRating !== null ? ', egen bedømmelse '.$i->userRating.'/10' : '');
+        $describe = function (MediaItem $i): string {
+            $bits = array_filter([
+                $i->directors ? 'instr. '.implode(', ', array_slice($i->directors, 0, 2)) : null,
+                $i->genres ? implode('/', array_slice($i->genres, 0, 3)) : null,
+                $i->type === MediaItem::SHOW ? "{$i->viewedLeafCount}/{$i->leafCount} afsnit" : ($i->viewCount > 1 ? "set {$i->viewCount} gange" : null),
+                $i->userRating !== null ? 'min bedømmelse '.round($i->userRating / 2, 1).'/5' : null,
+                $i->lastViewedAt ? 'sidst set '.date('Y-m', $i->lastViewedAt) : null,
+            ]);
+
+            return '- '.$i->label().($bits ? ' ('.implode(', ', $bits).')' : '');
+        };
+
+        $favorites = array_map(fn ($t) => $describe($t[0]), array_slice($profile->topTitles, 0, 25));
 
         $recent = [];
         try {
             foreach ($this->svc->mostWatched($type, 15, 90) as $r) {
                 if (isset($r['title'])) {
-                    $recent[] = "- {$r['title']} (sidst set {$r['last_viewed']}, {$r['plays_in_period']} ".($type === MediaItem::SHOW ? 'afsnit' : 'gange').')';
+                    $recent[] = "- {$r['title']} (sidst set {$r['last_viewed']})";
                 }
             }
         } catch (Throwable) {
-            // History endpoint unavailable: the profile is enough.
+            // History endpoint unavailable: favorites carry the recency info.
         }
 
-        $top = array_map(fn ($t) => '- '.$label($t[0]), array_slice($profile->topTitles, 0, 20));
+        // Low ratings and shows dropped early say what to avoid.
+        $disliked = array_filter($items, fn (MediaItem $i) => ($i->userRating !== null && $i->userRating <= 4)
+            || ($i->type === MediaItem::SHOW && $i->leafCount >= 6 && $i->viewedLeafCount > 0 && $i->viewedLeafCount <= 2
+                && $i->lastViewedAt && $i->lastViewedAt < time() - 30 * 86400));
+        $disliked = array_map(fn (MediaItem $i) => $describe($i), array_slice(array_values($disliked), 0, 20));
 
         $watched = array_filter($items, fn (MediaItem $i) => $i->watched());
         usort($watched, fn ($a, $b) => ($b->lastViewedAt ?? 0) <=> ($a->lastViewedAt ?? 0));
-        $seen = array_map(fn (MediaItem $i) => $i->label(), array_slice($watched, 0, 400));
+        $seen = array_map(fn (MediaItem $i) => $i->label(), array_slice($watched, 0, 500));
 
-        $unwatched = array_map(fn ($r) => $r['title'].($r['year'] ? " ({$r['year']})" : ''), $this->svc->unwatchedInLibrary($type, 150));
-        $sections = [
-            "Giv mig {$limit} anbefalinger til {$kind}.",
+        $before = $this->previous($type);
+
+        return implode("\n\n", array_filter([
+            "Find {$count} {$kind} til mig.",
+            'Hvor smalt: '.self::NICHE[$niche][0],
             $wish ? "Mit ønske lige nu: {$wish}" : null,
             "## Set for nylig (sidste 90 dage)\n".($recent ? implode("\n", $recent) : '–'),
-            "## Min smagsprofil (vægt 0-1, nyere visninger tæller mest)\n"
-                .'Genrer: '.$fmt($summary['top_genres'])."\n"
-                .'Instruktører: '.$fmt($summary['top_directors'])."\n"
-                .'Skuespillere: '.$fmt($summary['top_actors'])."\n"
-                .'Årtier: '.$fmt($summary['favorite_decades']),
-            "## Det jeg har engageret mig mest i\n".(implode("\n", $top) ?: '–'),
-            "## Usete {$kind} i mit bibliotek (kan foreslås)\n".(implode('; ', $unwatched) ?: '–'),
-            "## Allerede set (foreslå IKKE disse)\n".(implode('; ', $seen) ?: '–'),
-        ];
-
-        return implode("\n\n", array_filter($sections));
+            "## Mine favoritter (mest engagerede først)\n".(implode("\n", $favorites) ?: '–'),
+            $disliked ? "## Det brød jeg mig ikke om (lav bedømmelse eller droppet hurtigt)\n".implode("\n", $disliked) : null,
+            "## Allerede set (foreslå IKKE)\n".(implode('; ', $seen) ?: '–'),
+            $before ? "## Foreslået før (gentag IKKE)\n".implode('; ', $before) : null,
+        ]));
     }
 
     /** Parse JSON from a model answer, tolerating code fences or text around it. */
@@ -229,8 +362,25 @@ class ClaudeAdvisor
         return null;
     }
 
-    protected function cacheKey(string $type, ?string $wish): string
+    /** Titles suggested earlier, so asking again gives new ones. */
+    public function previous(string $type): array
     {
-        return 'plex-recommender:claude:'.md5($type.'|'.mb_strtolower((string) $wish).'|'.$this->settings->claudeDriver());
+        return $this->cache->get("plex-recommender:claude:previous:{$type}", []);
+    }
+
+    protected function remember(string $type, array $titles): void
+    {
+        $all = array_values(array_unique([...$titles, ...$this->previous($type)]));
+        $this->cache->forever("plex-recommender:claude:previous:{$type}", array_slice($all, 0, 150));
+    }
+
+    protected function cleanWish(?string $wish): ?string
+    {
+        return trim((string) $wish) ?: null;
+    }
+
+    protected function cacheKey(string $type, ?string $wish, string $niche): string
+    {
+        return 'plex-recommender:claude:v2:'.md5($type.'|'.mb_strtolower((string) $wish).'|'.$niche.'|'.$this->settings->claudeDriver());
     }
 }

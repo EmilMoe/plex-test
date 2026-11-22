@@ -20,13 +20,27 @@ class Recommendations extends Page
 
     protected static string | \BackedEnum | null $navigationIcon = Heroicon::OutlinedFilm;
 
-    protected static ?string $navigationLabel = 'Anbefalinger';
+    protected static ?string $navigationLabel = 'Forslag';
 
     protected static ?string $title = 'Hvad skal jeg se?';
 
     protected static ?string $slug = 'plex/anbefalinger';
 
-    protected static ?int $navigationSort = 10;
+    protected static ?int $navigationSort = -10;
+
+    /** As the panel's start page (plugin ->homePage()), the page lives at the panel root. */
+    public static function getRoutePath(\Filament\Panel $panel): string
+    {
+        try {
+            if ($panel->hasPlugin('plex-recommender') && $panel->getPlugin('plex-recommender')->isHomePage()) {
+                return '/';
+            }
+        } catch (Throwable) {
+            // fall through to the normal slug
+        }
+
+        return parent::getRoutePath($panel);
+    }
 
     protected string $view = 'plex-recommender::filament.recommendations';
 
@@ -34,7 +48,7 @@ class Recommendations extends Page
     public string $type = MediaItem::MOVIE;
 
     #[UrlAttribute]
-    public string $source = 'library';
+    public string $source = 'claude';
 
     #[UrlAttribute]
     public ?string $genre = null;
@@ -49,12 +63,24 @@ class Recommendations extends Page
 
     public ?string $claudeError = null;
 
+    /** How niche Claude's suggestions should be: kendt | smal | perler. */
+    #[UrlAttribute(as: 'smal')]
+    public string $niche = 'smal';
+
+    public function mount(): void
+    {
+        // AI suggestions are the default; fall back when Claude is turned off.
+        if ($this->source === 'claude' && ! $this->claudeEnabled()) {
+            $this->source = 'library';
+        }
+    }
+
     /** Ask Claude (slow: runs Claude Code or calls the API). Result is cached. */
     public function askClaude(bool $fresh = false): void
     {
         @set_time_limit(300);
         $this->claudeError = null;
-        $result = app(ClaudeAdvisor::class)->recommend($this->type, $this->wish, 12, $fresh);
+        $result = app(ClaudeAdvisor::class)->recommend($this->type, $this->wish, $this->niche, 12, $fresh);
         if (isset($result['error'])) {
             $this->claudeError = $result['error'];
         }
@@ -72,12 +98,12 @@ class Recommendations extends Page
             return null;
         }
 
-        return app(ClaudeAdvisor::class)->cached($this->type, $this->wish);
+        return app(ClaudeAdvisor::class)->cached($this->type, $this->wish, $this->niche);
     }
 
     public function getSubheading(): ?string
     {
-        return 'Forslag baseret på det, du ser mest i Plex.';
+        return 'Personlige forslag ud fra det, du ser og bedømmer i Plex.';
     }
 
     protected function getHeaderActions(): array
@@ -97,6 +123,14 @@ class Recommendations extends Page
     public function load(): void
     {
         $this->ready = true;
+    }
+
+    /** First visit without a saved answer: ask Claude right away (called from the view). */
+    public function autoAskClaude(): void
+    {
+        if ($this->source === 'claude' && $this->isConnected() && $this->claudeEnabled() && ! $this->claudeResult() && ! $this->wish) {
+            $this->askClaude();
+        }
     }
 
     public function updated(string $property): void
@@ -135,16 +169,16 @@ class Recommendations extends Page
                 return array_map(fn ($r) => [
                     'title' => $r['title'],
                     'year' => $r['year'],
-                    'poster' => ($thumb = $this->thumbFor($r['rating_key'])) ? URL::temporarySignedRoute('plex-recommender.poster', now()->addDay(), ['path' => $thumb]) : null,
-                    'badge' => $r['in_library'] ? 'I dit bibliotek' : null,
-                    'badge_title' => 'Ligger allerede på din Plex',
-                    'genres' => $r['genres'],
+                    'poster' => ($thumb = $this->thumbFor($r['rating_key'])) ? URL::temporarySignedRoute('plex-recommender.poster', now()->addDay(), ['path' => $thumb]) : ($r['poster'] ?? null),
+                    'badge' => $r['in_library'] ? 'På din Plex' : ($r['tmdb_rating'] ? number_format($r['tmdb_rating'], 1, ',', '') : null),
+                    'badge_title' => $r['in_library'] ? 'Ligger allerede på din Plex' : null,
+                    'genres' => array_values(array_filter([$r['director'] ? 'Instr. '.$r['director'] : null, $r['country']])),
                     'reasons' => array_values(array_filter([
                         $r['reason'],
                         $r['because_you_watched'] ? 'Fordi du så '.$this->list($r['because_you_watched']) : null,
                     ])),
-                    'summary' => $r['original_title'] ? 'Originaltitel: '.$r['original_title'] : null,
-                    'url' => $r['in_library'] ? null : 'https://www.themoviedb.org/search?query='.rawurlencode($r['title']),
+                    'summary' => $r['overview'] ?: ($r['original_title'] ? 'Originaltitel: '.$r['original_title'] : null),
+                    'url' => $r['url'] ?? 'https://www.themoviedb.org/search?query='.rawurlencode($r['title']),
                     'score' => null,
                     'why' => [],
                 ], $this->claudeResult()['recommendations'] ?? []);
@@ -184,7 +218,7 @@ class Recommendations extends Page
                 'why' => array_map(fn ($p) => [
                     'label' => $p['label'],
                     'detail' => $p['detail'],
-                    'value' => '+'.$this->num($p['points']),
+                    'value' => ($p['points'] >= 0 ? '+' : '').$this->num($p['points']),
                 ], $r['breakdown'] ?? []),
             ], $svc->unwatchedInLibrary($this->type, 24, $this->genre));
         } catch (Throwable $e) {

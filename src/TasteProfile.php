@@ -31,7 +31,7 @@ class TasteProfile
      * - Shows: more episodes and higher completion count more, capped so a long
      *   show weighs about as much as a much-loved movie; a show dropped after
      *   two episodes is a weak signal.
-     * - Your own star rating scales the weight.
+     * - Your own star rating scales the weight; 2 stars or less makes it negative.
      * - Recent viewing counts more than viewing from years ago.
      */
     public static function engagementWeight(MediaItem $item, ?int $now = null, int $halfLifeDays = 180): float
@@ -47,8 +47,13 @@ class TasteProfile
             ? 2.0 * min(1.0, log(1 + $item->viewedLeafCount, 2) / log(11, 2)) * (1.0 + $item->completion())
             : log(1 + $item->viewCount, 2) * 2.0;
 
+        // Your own star rating (Plex: 0-10, i.e. half stars). Good ratings boost
+        // the weight; low ratings (2 stars or less) turn it negative, so a film you
+        // disliked pulls its genres, director and actors *down* in the profile.
         if ($item->userRating !== null) {
-            $w *= 0.25 + 1.5 * ($item->userRating / 10);
+            $w *= $item->userRating >= 5
+                ? 0.25 + 1.5 * ($item->userRating / 10)
+                : -(5 - $item->userRating) / 5;
         }
         if ($item->lastViewedAt) {
             $ageDays = max(0, (($now ?? time()) - $item->lastViewedAt) / 86400);
@@ -67,10 +72,12 @@ class TasteProfile
 
         foreach ($items as $item) {
             $w = self::engagementWeight($item, $now, $halfLifeDays);
-            if ($w <= 0) {
+            if ($w == 0) {
                 continue;
             }
-            $weighted[] = [$item, $w];
+            if ($w > 0) {
+                $weighted[] = [$item, $w]; // only liked titles count as favourites
+            }
             foreach ($item->genres as $g) {
                 $g = mb_strtolower($g);
                 $genres[$g] = ($genres[$g] ?? 0) + $w;
@@ -103,9 +110,10 @@ class TasteProfile
             return [];
         }
         arsort($d);
-        $top = max($d);
+        $top = max(max($d), 1e-9);
 
-        return array_map(fn ($v) => $v / $top, $d);
+        // Disliked entries keep a negative value (down to -1) so they count against a title.
+        return array_map(fn ($v) => max(-1.0, $v / $top), $d);
     }
 
     /** 0..1 score of how well a set of genre names matches the profile. */
@@ -143,15 +151,22 @@ class TasteProfile
         }
         $add('Genre', $genrePoints, implode(', ', array_slice($item->genres, 0, 3)));
 
-        $dHits = array_values(array_filter($item->directors, fn ($d) => isset($this->directors[$d])));
+        $dHits = array_values(array_filter($item->directors, fn ($d) => ($this->directors[$d] ?? 0) > 0));
+        $dMiss = array_values(array_filter($item->directors, fn ($d) => ($this->directors[$d] ?? 0) < 0));
         $directorPoints = 0.0;
         if ($dHits) {
             $directorPoints = max(array_map(fn ($d) => $this->directors[$d], $dHits)) * 1.5;
             $reasons[] = 'instruktør: '.implode(', ', $dHits);
             $add('Instruktør', $directorPoints, implode(', ', $dHits));
         }
+        if ($dMiss) {
+            // A director behind something you rated low counts against the title.
+            $penalty = min(array_map(fn ($d) => $this->directors[$d], $dMiss)) * 1.5;
+            $directorPoints += $penalty;
+            $parts[] = ['label' => 'Instruktør', 'points' => round($penalty, 2), 'detail' => implode(', ', $dMiss).' (lav bedømmelse fra dig)'];
+        }
 
-        $aHits = array_values(array_filter($item->actors, fn ($a) => isset($this->actors[$a])));
+        $aHits = array_values(array_filter($item->actors, fn ($a) => ($this->actors[$a] ?? 0) > 0));
         $actorPoints = 0.0;
         if ($aHits) {
             $actorPoints = min(1.5, array_sum(array_map(fn ($a) => $this->actors[$a], $aHits)));
@@ -204,11 +219,11 @@ class TasteProfile
 
     public function summary(int $topN = 10): array
     {
-        $top = fn (array $d) => array_map(
-            fn ($k, $v) => ['name' => (string) $k, 'weight' => round($v, 2)],
-            array_keys(array_slice($d, 0, $topN, true)),
-            array_slice($d, 0, $topN, true),
-        );
+        $top = function (array $d) use ($topN) {
+            $d = array_slice(array_filter($d, fn ($v) => $v > 0), 0, $topN, true);
+
+            return array_map(fn ($k, $v) => ['name' => (string) $k, 'weight' => round($v, 2)], array_keys($d), $d);
+        };
 
         return [
             'top_genres' => $top($this->genres),

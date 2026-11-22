@@ -52,6 +52,27 @@ class TmdbClient
         return $out;
     }
 
+    /**
+     * Best match for a title (optionally with year), or null. Tries the year
+     * first, then without it, since years often differ by one between sources.
+     */
+    public function search(string $type, string $title, ?int $year = null): ?array
+    {
+        $yearParam = $type === MediaItem::MOVIE ? 'year' : 'first_air_date_year';
+        foreach ($year ? [$year, null] : [null] as $y) {
+            $query = ['query' => $title, 'language' => $this->language, 'include_adult' => 'false'];
+            if ($y) {
+                $query[$yearParam] = $y;
+            }
+            $results = $this->get('/search/'.self::kind($type), $query)['results'] ?? [];
+            if ($results) {
+                return $results[0];
+            }
+        }
+
+        return null;
+    }
+
     /** Resolve a TMDB id from an IMDb or TVDB id (for items lacking a tmdb guid). */
     public function findTmdbId(string $type, ?string $imdbId, ?string $tvdbId): ?string
     {

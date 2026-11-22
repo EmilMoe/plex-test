@@ -192,7 +192,7 @@ class PlexSettings extends Page
                         ->visible(fn ($get) => $get('claude_driver') === 'api'),
                     TextInput::make('claude_model')
                         ->label('Model (valgfri)')
-                        ->placeholder(fn ($get) => $get('claude_driver') === 'api' ? 'claude-opus-5-5' : 'Claude Codes standard')
+                        ->placeholder(fn ($get) => $get('claude_driver') === 'api' ? 'claude-opus-5-5' : 'opus')
                         ->helperText('Lad stå tom for standard.')
                         ->visible(fn ($get) => $get('claude_driver') !== 'off'),
                 ])

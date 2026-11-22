@@ -27,7 +27,8 @@ class ClaudeCodeDriver implements ClaudeDriver
     {
         $binary = $this->resolveBinary();
 
-        $command = [$binary, '-p', '--output-format', 'json', '--append-system-prompt', $system];
+        // Replace Claude Code's own (coding) system prompt: this is a film task.
+        $command = [$binary, '-p', '--output-format', 'json', '--system-prompt', $system];
         if ($this->model) {
             array_push($command, '--model', $this->model);
         }

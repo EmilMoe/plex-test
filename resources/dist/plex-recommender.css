@@ -103,3 +103,9 @@
 .pr-claude-error { margin: 0; font-size: .875rem; color: var(--danger-600); }
 .dark .pr-claude-error { color: var(--danger-400); }
 .pr-claude-bar .pr-muted { margin: 0; font-size: .8rem; }
+.pr-taste { display: flex; gap: .75rem; align-items: flex-start; padding: 1rem 1.1rem; border-radius: .75rem; background: color-mix(in oklab, var(--primary-500) 8%, transparent); outline: 1px solid color-mix(in oklab, var(--primary-500) 25%, transparent); font-size: .9rem; line-height: 1.55; color: var(--gray-800); }
+.dark .pr-taste { color: var(--gray-200); }
+.pr-taste p { margin: 0; }
+.pr-taste-label { font-size: .75rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--primary-600); margin-bottom: .2rem !important; }
+.dark .pr-taste-label { color: var(--primary-400); }
+.pr-taste-icon { width: 1.4rem; height: 1.4rem; flex: none; color: var(--primary-500); margin-top: .1rem; }

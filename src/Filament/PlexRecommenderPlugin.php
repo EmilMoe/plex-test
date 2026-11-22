@@ -22,6 +22,8 @@ class PlexRecommenderPlugin implements Plugin
 
     protected bool $settingsPage = true;
 
+    protected bool $homePage = true;
+
     public static function make(): static
     {
         return app(static::class);
@@ -69,6 +71,23 @@ class PlexRecommenderPlugin implements Plugin
         $this->settingsPage = $enabled;
 
         return $this;
+    }
+
+    /**
+     * Make the suggestions page the panel's start page (served at the panel
+     * root, e.g. /admin). Remove Filament's Dashboard from your panel provider's
+     * ->pages([...]) so it doesn't compete for the same address.
+     */
+    public function homePage(bool $enabled = true): static
+    {
+        $this->homePage = $enabled;
+
+        return $this;
+    }
+
+    public function isHomePage(): bool
+    {
+        return $this->homePage;
     }
 
     public function register(Panel $panel): void

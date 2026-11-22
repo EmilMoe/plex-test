@@ -56,6 +56,21 @@ class InstallCommand extends Command
         return self::SUCCESS;
     }
 
+    /**
+     * Remove Filament's default Dashboard from ->pages([...]) so the suggestions
+     * page can be the panel's start page.
+     */
+    public static function removeDashboard(string $code): string
+    {
+        $updated = preg_replace('/^[ \t]*(?:\\\\?Filament\\\\Pages\\\\|Pages\\\\)?Dashboard::class,?[ \t]*\R/m', '', $code) ?? $code;
+        // Drop the now unused import, unless Dashboard is still referenced elsewhere.
+        if ($updated !== $code && ! preg_match('/\bDashboard\b/', preg_replace('/^use [^;]+;$/m', '', $updated))) {
+            $updated = preg_replace('/^use Filament\\\\Pages\\\\Dashboard;\R/m', '', $updated) ?? $updated;
+        }
+
+        return $updated;
+    }
+
     /** Add ->plugin(PlexRecommenderPlugin::make()) to the app's Filament panel provider(s). */
     protected function registerFilamentPlugin(Filesystem $files): void
     {
@@ -72,6 +87,10 @@ class InstallCommand extends Command
         foreach ($providers as $path) {
             $code = $files->get($path);
             $name = basename($path);
+            if (($withoutDashboard = self::removeDashboard($code)) !== $code) {
+                $files->put($path, $code = $withoutDashboard);
+                $this->components->info("Filaments Dashboard er fjernet fra {$name}. Forslagssiden er nu startsiden.");
+            }
             if (str_contains($code, 'PlexRecommenderPlugin')) {
                 $this->components->info("Plex-pluginnet er allerede i {$name}");
 

@@ -84,6 +84,19 @@ class Fixtures
                 ['id' => 3, 'title' => 'Obscure Thing', 'release_date' => '2020-01-01', 'vote_count' => 3, 'vote_average' => 9.0, 'genre_ids' => [878]],
                 ['id' => 4, 'title' => 'Rom-com Deluxe', 'release_date' => '2019-01-01', 'vote_count' => 500, 'vote_average' => 6.0, 'genre_ids' => [10749, 35]],
             ]]),
+            'api.themoviedb.org/3/search/*' => function ($request) {
+                parse_str(parse_url($request->url(), PHP_URL_QUERY) ?? '', $q);
+                $known = [
+                    'dune' => ['id' => 438631, 'title' => 'Dune', 'release_date' => '2021-09-15', 'vote_count' => 9000, 'vote_average' => 7.8],
+                    'arrival' => ['id' => 329865, 'title' => 'Arrival', 'release_date' => '2016-11-10', 'vote_count' => 18000, 'vote_average' => 7.6],
+                    'ex machina' => ['id' => 2, 'title' => 'Ex Machina', 'release_date' => '2015-01-21', 'vote_count' => 12000, 'vote_average' => 7.6, 'poster_path' => '/exm.jpg', 'overview' => 'En programmør tester en AI.'],
+                    'hævnen' => ['id' => 3, 'title' => 'Hævnen', 'release_date' => '2010-08-26', 'vote_count' => 900, 'vote_average' => 7.3],
+                    'tvillingerne' => ['id' => 4, 'title' => 'Tvillingerne', 'release_date' => '2005-01-01', 'vote_count' => 40, 'vote_average' => 6.9],
+                ];
+                $hit = $known[mb_strtolower($q['query'] ?? '')] ?? null;
+
+                return Http::response(['results' => $hit ? [$hit] : []]);
+            },
             'api.themoviedb.org/3/find/*' => Http::response(['movie_results' => [], 'tv_results' => []]),
             'api.themoviedb.org/3/tv/*/recommendations*' => Http::response(['total_pages' => 1, 'results' => []]),
         ];

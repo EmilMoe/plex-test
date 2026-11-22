@@ -30,6 +30,7 @@ class FilamentTest extends TestCase
     public function test_recommendations_page_shows_library_and_new_titles(): void
     {
         Livewire::test(Recommendations::class)
+            ->set('source', 'library')
             ->call('load')
             ->assertSee('Dune')
             ->assertSee('Instruktør: Denis Villeneuve')
@@ -48,6 +49,7 @@ class FilamentTest extends TestCase
     public function test_recommendations_genre_filter(): void
     {
         Livewire::test(Recommendations::class)
+            ->set('source', 'library')
             ->call('load')
             ->set('genre', 'Romance')
             ->assertSee('Love Actually')

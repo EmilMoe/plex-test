@@ -16,6 +16,7 @@ class PlexCommand extends Command
         {--genre= : Filtrér på genre (unwatched)}
         {--days= : Kun de sidste N dage (most-watched)}
         {--wish= : Dit ønske til Claude, f.eks. "noget let" (claude)}
+        {--niche=smal : Hvor smalt: kendt | smal | perler (claude)}
         {--fresh : Spørg Claude igen i stedet for at bruge sidste svar (claude)}
         {--limit=20 : Antal resultater}
         {--json : Output som JSON}';
@@ -35,7 +36,7 @@ class PlexCommand extends Command
             'history' => $svc->recentHistory($limit),
             'unwatched' => $svc->unwatchedInLibrary($type, $limit, $this->option('genre')),
             'recommend' => $svc->recommendNew($type, $limit),
-            'claude' => app(\EmilMoe\PlexRecommender\Claude\ClaudeAdvisor::class)->recommend($type, $this->option('wish'), min($limit, 20), (bool) $this->option('fresh')),
+            'claude' => app(\EmilMoe\PlexRecommender\Claude\ClaudeAdvisor::class)->recommend($type, $this->option('wish'), $this->option('niche'), min($limit, 20), (bool) $this->option('fresh')),
             'check' => $svc->checkOwned($args),
             'refresh' => tap(['ok' => 'Cache ryddet.'], fn () => $svc->refresh()),
             default => null,
@@ -66,6 +67,10 @@ class PlexCommand extends Command
             return;
         }
         if (isset($result['driver'])) {
+            if ($result['taste_summary']) {
+                $this->info('Din smag ifølge Claude:');
+                $this->line('  '.$result['taste_summary']);
+            }
             foreach ($result['recommendations'] as $r) {
                 $this->newLine();
                 $this->line('<info>'.$r['title'].($r['year'] ? " ({$r['year']})" : '').'</info>'.($r['in_library'] ? ' <comment>[i dit bibliotek]</comment>' : ''));

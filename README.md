@@ -1,11 +1,11 @@
 # Plex Recommender
 
-Hvad skal du se i aften? Pakken læser, hvad du har **set mest** i Plex, og hvad du **har**
-i dit bibliotek. Ud fra det foreslår den film og serier, du **ikke har set**: både fra dit
-eget bibliotek og nye titler, der er værd at skaffe.
+Hvad skal du se i aften? Pakken læser, hvad du har **set** og **bedømt** i Plex, og lader
+**Claude** finde film og serier, du ikke har set, gerne de smalle titler, som
+streamingtjenesternes "du vil måske også kunne lide" aldrig finder.
 
 Pakken giver dig tre ting:
-- **Et Filament-panel** med anbefalinger, din smagsprofil og alle indstillinger. Der er
+- **Et Filament-panel** med Claudes forslag som startside, din smagsprofil og alle indstillinger. Der er
   ingen `.env`-filer, der skal redigeres, og ingen tokens, du skal finde frem.
 - **Claude Code-integration**: skriv `/anbefal serier mørk nordisk krimi` i Claude Code.
 - **Artisan-kommandoer og en facade** til dine egne features.
@@ -29,7 +29,8 @@ php artisan plex:install
 ```
 
 `plex:install` gør det hele:
-- tilføjer `->plugin(PlexRecommenderPlugin::make())` til dit Filament-panel
+- tilføjer `->plugin(PlexRecommenderPlugin::make())` til dit Filament-panel og fjerner
+  Filaments Dashboard, så forslagssiden bliver startsiden
 - publicerer CSS (`filament:assets`) og config
 - tilføjer MCP-serveren `plex` til `.mcp.json` og lægger `/anbefal` og `/smagsprofil` i
   `.claude/commands/`
@@ -38,7 +39,7 @@ Har du ikke et Filament-panel endnu, så kør først `php artisan filament:insta
 
 ## Brug (for alle)
 
-Åbn panelet. Under **Plex** i menuen findes tre sider:
+Åbn panelet. Du lander direkte på forslagene. Under **Plex** i menuen findes tre sider:
 
 ### 1. Indstillinger: forbind på ét minut
 
@@ -55,16 +56,17 @@ bl.a. vælge, hvis historik der bruges, hvis I er flere på serveren.
 
 ![Indstillinger](docs/settings.png)
 
-### 2. Anbefalinger: "Hvad skal jeg se?"
-- **Fra dit bibliotek**: det, du har, men ikke har set, sorteret efter hvor godt det passer
-  til dig. Hver titel har en begrundelse, f.eks. *Instruktør: Denis Villeneuve*.
-- **Værd at skaffe**: nye titler, der minder om dine favoritter (*Fordi du så Dark og
+### 2. Forslag: "Hvad skal jeg se?" (startsiden)
+- **Claudes forslag** (standard): Claude beskriver din smag med egne ord og finder titler,
+  der passer. Vælg hvor smalt: *Også kendte*, *Mindre kendte* eller *Skjulte perler*, og
+  skriv evt. hvad du er i humør til. Første gang spørges automatisk, derefter gemmes svaret
+  en uge. *Nye forslag* spørger igen og undgår det, Claude har foreslået før. Se
+  [Claudes forslag](#claudes-forslag).
+- **Uset i dit bibliotek**: det, du har, men ikke har set, sorteret efter hvor godt det
+  passer til dig. Klik *Hvorfor?* for at se pointene.
+- **Lignende titler**: TMDB's anbefalinger for dine favoritter (*Fordi du så Dark og
   Severance*).
-- **Spørg Claude**: Claude læser din smagsprofil og det du har set for nylig og skriver
-  personlige forslag med begrundelse. Skriv evt. hvad du er i humør til. Se
-  [Spørg Claude](#spørg-claude) nedenfor.
-- Skift mellem film og serier, og filtrér på genre. Klik *Hvorfor?* på et kort for at se
-  præcis hvor pointene kommer fra.
+- Skift mellem film og serier.
 
 ### 3. Min smag
 Dine yndlingsgenrer, instruktører, skuespillere og årtier, de film og serier du har set
@@ -82,6 +84,7 @@ $panel->plugin(
         ->navigationGroup('Underholdning')                   // eller null
         ->canManageSettings(fn () => auth()->user()->is_admin) // hvem må ændre indstillinger
         // ->settingsPage(false)                             // skjul siden, kun .env
+        // ->homePage(false)                                 // forslagssiden er ikke startsiden
 );
 ```
 
@@ -90,7 +93,8 @@ $panel->plugin(
 1. Alle film og serier hentes fra Plex med visninger, sete afsnit, din egen rating,
    genrer, instruktører og skuespillere.
 2. Hver set titel får en vægt. Gensyn tæller, en serie du har set færdig tæller mere end
-   en, du droppede efter to afsnit, din stjerne-rating tæller med, og nyere visninger
+   en, du droppede efter to afsnit, din stjerne-rating tæller med (2 stjerner eller mindre
+   trækker genre, instruktør og skuespillere ned), og nyere visninger
    vejer tungere (halveringstid 180 dage som standard). En serie vejer aldrig mere end en
    film, du har set tre gange, uanset hvor mange afsnit den har.
 3. Vægtene giver en profil over genrer, instruktører, skuespillere og årtier. Usete titler
@@ -99,25 +103,36 @@ $panel->plugin(
    hvor mange af dine favoritter der peger på dem, genre-match og score. Titler, du
    allerede har, filtreres fra.
 
-## Spørg Claude
+## Claudes forslag
 
-Fanen *Spørg Claude* på anbefalingssiden sender din smagsprofil, din nylige historik,
-listen over usete titler i dit bibliotek og det du allerede har set til Claude. Svaret
-tjekkes mod dit bibliotek: titler du har set, fjernes, og titler du har, markeres.
-Svaret gemmes i 12 timer. Tryk *Spørg igen* for nye forslag.
+Claude får:
+- dine favoritter med instruktør, genre, sete afsnit og **dine egne stjerner fra Plex**
+- det du har set de sidste 90 dage (vejer mest)
+- det du gav 2 stjerner eller mindre, og serier du droppede efter et par afsnit
+- alt du har set, og det Claude har foreslået før
 
-Vælg under **Indstillinger → Spørg Claude**:
+Claude skriver først en kort beskrivelse af din smag (tone, temaer, tempo, lande) og finder
+så titler, der passer. Bagefter slås hvert forslag op på TMDB:
+- titler der ikke findes, sorteres fra (Claude kan tage fejl)
+- titler med for mange stemmer til det valgte niveau sorteres fra: *Mindre kendte* højst
+  8.000 stemmer (serier 3.000), *Skjulte perler* højst 1.500 (serier 600)
+- titler du har set, sorteres fra, og titler du har, markeres *På din Plex*
 
-- **Claude Code på denne computer** (standard): kører `claude -p` med dit eget Claude-login.
-  Ingen API-nøgle, men appen skal køre på samme computer som Claude Code, og forbruget
-  tæller med i dit abonnement. Webserveren skal kunne finde `claude`. Finder den ikke
-  programmet, så indsæt stien fra `which claude`. Claude Code skal være logget ind som
-  den bruger, webserveren kører som. Tryk *Test forbindelse* for at tjekke.
+TMDB-nøglen er derfor stærkt anbefalet. Uden den springes tjekket over.
+
+**Vælg under Indstillinger → Spørg Claude:**
+
+- **Claude Code på denne computer** (standard): kører `claude -p` med dit eget Claude-login
+  og Opus som model. Ingen API-nøgle, men appen skal køre på samme computer som Claude Code,
+  og forbruget tæller med i dit abonnement. Webserveren skal kunne finde `claude`. Finder den
+  ikke programmet, så indsæt stien fra `which claude`. Claude Code skal være logget ind som
+  den bruger, webserveren kører som. Tryk *Test forbindelse* for at tjekke. Et svar tager
+  30–90 sekunder, så webserverens timeout (nginx/Herd/Valet) skal være højere end det.
 - **Claude API**: til når appen kører på en server. Kræver en API-nøgle fra
   console.anthropic.com (betales efter forbrug) og `composer require anthropic-ai/sdk`.
-- **Slået fra**.
+- **Slået fra**: siden åbner så på *Uset i dit bibliotek*.
 
-Fra terminalen: `php artisan plex claude show --wish="noget let og dansk"`.
+Fra terminalen: `php artisan plex claude show --niche=perler --wish="noget stille og nordisk"`.
 
 ## Claude Code (MCP)
 
@@ -146,7 +161,7 @@ php artisan plex profile [movie|show]
 php artisan plex most-watched show --days=90
 php artisan plex unwatched movie --genre=Thriller
 php artisan plex recommend show
-php artisan plex claude movie --wish="noget let" [--fresh]
+php artisan plex claude movie --niche=smal --wish="noget let" [--fresh]
 php artisan plex check "Dark (2017)" "The Bear"
 ```
 Tilføj `--json` for rå JSON.
@@ -177,7 +192,7 @@ noget i panelet:
 | `PLEX_RECOMMENDER_CACHE_TTL` | Avanceret → Opdater biblioteket hvert … |
 | `PLEX_RECOMMENDER_CLAUDE` (`code`/`api`/`off`) | Spørg Claude → Hvordan |
 | `PLEX_RECOMMENDER_CLAUDE_BINARY` | Spørg Claude → Sti til Claude Code |
-| `PLEX_RECOMMENDER_CLAUDE_MODEL` | Spørg Claude → Model |
+| `PLEX_RECOMMENDER_CLAUDE_MODEL` | Spørg Claude → Model (standard `opus` for Claude Code) |
 | `ANTHROPIC_API_KEY` | Spørg Claude → API-nøgle |
 
 Indstillingerne gemmes krypteret med `APP_KEY` i `storage/app/plex-recommender.json`.

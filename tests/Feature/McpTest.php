@@ -62,4 +62,15 @@ class McpTest extends TestCase
         File::delete([$base.'/.mcp.json', config_path('plex-recommender.php')]);
         File::deleteDirectory($base.'/.claude');
     }
+
+    public function test_install_removes_filament_dashboard(): void
+    {
+        $code = "<?php\nuse Filament\\Pages\\Dashboard;\nuse Filament\\Panel;\n\n\$panel->id('admin')\n    ->pages([\n        Dashboard::class,\n    ]);\n";
+
+        $out = \EmilMoe\PlexRecommender\Console\InstallCommand::removeDashboard($code);
+
+        $this->assertStringNotContainsString('Dashboard', $out);
+        $this->assertStringContainsString('use Filament\\Panel;', $out);
+        $this->assertSame($out, \EmilMoe\PlexRecommender\Console\InstallCommand::removeDashboard($out));
+    }
 }
