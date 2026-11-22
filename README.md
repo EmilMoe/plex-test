@@ -20,27 +20,37 @@ composer require emilmoe/plex-recommender:dev-main     # eller dev-<branch>
 php artisan plex:install
 ```
 
-`plex:install` gør tre ting:
-1. publicerer `config/plex-recommender.php`
-2. tilføjer MCP-serveren `plex` til `.mcp.json` (`php artisan mcp:start plex`)
-3. lægger slash-kommandoerne `/anbefal` og `/smagsprofil` i `.claude/commands/`
+`plex:install` publicerer configen, tilføjer MCP-serveren `plex` til `.mcp.json`
+(`php artisan mcp:start plex`) og lægger `/anbefal` og `/smagsprofil` i `.claude/commands/`.
 
-Tilføj til `.env` (se `.env.example`):
+### Forbind til Plex: én knap, ingen token
 
-```dotenv
-PLEX_URL=http://192.168.1.10:32400
-PLEX_TOKEN=xxxxxxxx
-TMDB_API_KEY=xxxxxxxx      # valgfri, men anbefalet
+Gå til **`/plex`** i din app og tryk **Log ind med Plex**, ligesom i Overseerr/Jellyseerr.
+Du sendes til plex.tv, logger ind og kommer tilbage. Derefter sker resten automatisk:
+
+- dine servere hentes fra din Plex-konto (har du flere, vælger du én)
+- den bedste forbindelse testes og vælges: lokal adresse først, så ekstern, relay til sidst
+- serverens token gemmes **krypteret** med din `APP_KEY` i `storage/app/plex-recommender.json`
+
+Uden browser, f.eks. på en server eller direkte fra Claude Code:
+
+```bash
+php artisan plex:login      # viser et link; log ind, så forbindes der automatisk
+php artisan plex:logout
 ```
 
-Test forbindelsen: `php artisan plex overview`
+> `/plex` kræver som standard, at man er logget ind i din app (`web,auth`-middleware).
+> Har appen ingen brugere, så sæt `PLEX_RECOMMENDER_MIDDLEWARE=web` i `.env`.
+> Prefix og middleware kan ændres i `config/plex-recommender.php`, og viewet kan
+> publiceres med `php artisan vendor:publish --tag=plex-recommender-views`.
 
-**Plex-token:** åbn Plex Web, vælg en vilkårlig film → `⋯` → *Get Info* → *View XML*.
-URL'en indeholder `X-Plex-Token=...`.
+Vil du hellere bruge en token manuelt, kan du stadig sætte `PLEX_URL` og `PLEX_TOKEN`
+i `.env`. De vinder over login.
 
-**TMDB (valgfri):** opret en gratis konto på themoviedb.org → Settings → API. Både
-"API Key" (v3) og "API Read Access Token" virker. Uden TMDB virker alt undtagen
-`recommend-new`, og Claude foreslår så selv titler og tjekker dem med `check-owned`.
+**TMDB (valgfri, anbefalet):** sæt `TMDB_API_KEY` i `.env`. En gratis nøgle fås på
+themoviedb.org → Settings → API; både "API Key" (v3) og "API Read Access Token" virker.
+Uden TMDB virker alt undtagen `recommend-new`, og Claude foreslår så selv titler og tjekker
+dem med `check-owned`.
 
 Krav: PHP 8.2+, Laravel 12 eller 13.
 
@@ -66,7 +76,7 @@ Krav: PHP 8.2+, Laravel 12 eller 13.
 
 ## Brug med Claude Code
 
-Åbn projektet i Claude Code og godkend MCP-serveren `plex` (eller tjek med `/mcp`).
+Forbind Plex (se ovenfor), åbn projektet i Claude Code og godkend MCP-serveren `plex` (eller tjek med `/mcp`).
 
 | Kommando | |
 |---|---|

@@ -46,8 +46,9 @@ class InstallCommand extends Command
 
         $this->newLine();
         $this->line('Næste skridt:');
-        $this->line('  1. Sæt PLEX_URL, PLEX_TOKEN (og evt. TMDB_API_KEY) i .env');
-        $this->line('  2. Test: php artisan plex overview');
+        $this->line('  1. Forbind Plex: gå til '.url(config('plex-recommender.routes.prefix', 'plex'))
+            .' og tryk "Log ind med Plex", eller kør: php artisan plex:login');
+        $this->line('  2. (Valgfrit) Sæt TMDB_API_KEY i .env for forslag til nye titler');
         $this->line('  3. Åbn projektet i Claude Code og kør /anbefal');
 
         return self::SUCCESS;

@@ -24,6 +24,15 @@ abstract class TestCase extends Orchestra
         $app['config']->set('plex-recommender.plex.token', 'tok');
         $app['config']->set('plex-recommender.tmdb.api_key', 'key');
         $app['config']->set('cache.default', 'array');
+        $app['config']->set('app.key', 'base64:'.base64_encode(str_repeat('k', 32)));
+        $app['config']->set('plex-recommender.credentials_path', sys_get_temp_dir().'/plex-recommender-test-'.getmypid().'.json');
+        $app['config']->set('plex-recommender.routes.middleware', ['web']);
+    }
+
+    protected function tearDown(): void
+    {
+        @unlink(sys_get_temp_dir().'/plex-recommender-test-'.getmypid().'.json');
+        parent::tearDown();
     }
 
     protected function setUp(): void

@@ -2,6 +2,7 @@
 
 namespace EmilMoe\PlexRecommender\Clients;
 
+use EmilMoe\PlexRecommender\Auth\CredentialStore;
 use EmilMoe\PlexRecommender\Data\MediaItem;
 use Generator;
 use Illuminate\Http\Client\Factory as Http;
@@ -14,27 +15,26 @@ class PlexClient
 
     public function __construct(
         protected Http $http,
-        protected ?string $url,
-        protected ?string $token,
+        protected CredentialStore $credentials,
         protected bool $verifySsl = true,
         protected int $timeout = 30,
     ) {}
 
     protected function request(): PendingRequest
     {
-        if (! $this->url || ! $this->token) {
+        if (! $this->credentials->connected()) {
             throw new RuntimeException(
-                'PLEX_URL og PLEX_TOKEN skal være sat i .env. Se README for hvordan du finder dit Plex-token.'
+                'Ikke forbundet til Plex. Gå til /plex og tryk "Log ind med Plex", eller kør: php artisan plex:login'
             );
         }
 
         return $this->http
-            ->baseUrl(rtrim($this->url, '/'))
+            ->baseUrl(rtrim($this->credentials->url(), '/'))
             ->acceptJson()
             ->timeout($this->timeout)
             ->withOptions(['verify' => $this->verifySsl])
             ->withHeaders([
-                'X-Plex-Token' => $this->token,
+                'X-Plex-Token' => $this->credentials->token(),
                 'X-Plex-Client-Identifier' => 'laravel-plex-recommender',
                 'X-Plex-Product' => 'laravel-plex-recommender',
             ]);

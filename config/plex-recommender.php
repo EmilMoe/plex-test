@@ -3,8 +3,11 @@
 return [
 
     /*
-    | Din Plex Media Server, f.eks. http://192.168.1.10:32400
-    | Tokenet finder du i Plex Web: en film → Get Info → View XML → X-Plex-Token=...
+    | Forbindelse til Plex. Nemmest: gå til /plex og tryk "Log ind med Plex",
+    | eller kør `php artisan plex:login`. Så findes server og token automatisk
+    | og gemmes krypteret i `credentials_path`.
+    |
+    | Alternativt kan du sætte PLEX_URL + PLEX_TOKEN manuelt; de vinder over login.
     */
     'plex' => [
         'url' => env('PLEX_URL'),
@@ -22,6 +25,18 @@ return [
     'tmdb' => [
         'api_key' => env('TMDB_API_KEY'),
         'language' => env('PLEX_RECOMMENDER_LANGUAGE', 'da-DK'),
+    ],
+
+    // Hvor login-forbindelsen gemmes (krypteret med APP_KEY).
+    'credentials_path' => storage_path('app/plex-recommender.json'),
+
+    // Siden med "Log ind med Plex"-knappen.
+    'routes' => [
+        'enabled' => env('PLEX_RECOMMENDER_ROUTES', true),
+        'prefix' => 'plex',
+        // Standard kræver at man er logget ind i din app. Har appen ingen login,
+        // så sæt PLEX_RECOMMENDER_MIDDLEWARE=web
+        'middleware' => explode(',', env('PLEX_RECOMMENDER_MIDDLEWARE', 'web,auth')),
     ],
 
     // Biblioteksdata caches i så mange sekunder (Laravel-cachen).

@@ -2,6 +2,8 @@
 
 namespace EmilMoe\PlexRecommender;
 
+use EmilMoe\PlexRecommender\Auth\CredentialStore;
+use EmilMoe\PlexRecommender\Auth\PlexTv;
 use EmilMoe\PlexRecommender\Clients\PlexClient;
 use EmilMoe\PlexRecommender\Clients\TmdbClient;
 use EmilMoe\PlexRecommender\Mcp\PlexServer;
@@ -15,10 +17,19 @@ class PlexRecommenderServiceProvider extends ServiceProvider
     {
         $this->mergeConfigFrom(__DIR__.'/../config/plex-recommender.php', 'plex-recommender');
 
+        $this->app->singleton(CredentialStore::class, fn ($app) => new CredentialStore(
+            $app->make('files'),
+            $app->make('encrypter'),
+            config('plex-recommender.credentials_path') ?: storage_path('app/plex-recommender.json'),
+            config('plex-recommender.plex.url') ?: null,
+            config('plex-recommender.plex.token') ?: null,
+        ));
+
+        $this->app->singleton(PlexTv::class, fn ($app) => new PlexTv($app->make(Http::class), $app->make(CredentialStore::class)));
+
         $this->app->singleton(PlexClient::class, fn ($app) => new PlexClient(
             $app->make(Http::class),
-            config('plex-recommender.plex.url'),
-            config('plex-recommender.plex.token'),
+            $app->make(CredentialStore::class),
             filter_var(config('plex-recommender.plex.verify_ssl', true), FILTER_VALIDATE_BOOL),
             (int) config('plex-recommender.plex.timeout', 30),
         ));
@@ -43,6 +54,12 @@ class PlexRecommenderServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        $this->loadViewsFrom(__DIR__.'/../resources/views', 'plex-recommender');
+
+        if (config('plex-recommender.routes.enabled', true)) {
+            $this->loadRoutesFrom(__DIR__.'/../routes/web.php');
+        }
+
         if ($this->app->runningInConsole()) {
             $this->publishes([
                 __DIR__.'/../config/plex-recommender.php' => config_path('plex-recommender.php'),
@@ -52,7 +69,16 @@ class PlexRecommenderServiceProvider extends ServiceProvider
                 __DIR__.'/../stubs/claude/commands' => base_path('.claude/commands'),
             ], 'plex-recommender-claude');
 
-            $this->commands([Console\PlexCommand::class, Console\InstallCommand::class]);
+            $this->publishes([
+                __DIR__.'/../resources/views' => resource_path('views/vendor/plex-recommender'),
+            ], 'plex-recommender-views');
+
+            $this->commands([
+                Console\PlexCommand::class,
+                Console\InstallCommand::class,
+                Console\LoginCommand::class,
+                Console\LogoutCommand::class,
+            ]);
         }
 
         // Register the stdio MCP server: php artisan mcp:start plex
