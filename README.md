@@ -60,8 +60,10 @@ bl.a. vælge, hvis historik der bruges, hvis I er flere på serveren.
 - **Claudes forslag** (standard): Claude beskriver din smag med egne ord og finder titler,
   der passer. Vælg hvor smalt: *Også kendte*, *Mindre kendte* eller *Skjulte perler*. Klik
   på hurtige valg (stemning, længde, hvorfra) og på de opklarende spørgsmål, Claude selv
-  stiller ud fra din smag, eller skriv hvad du er i humør til. Første gang spørges automatisk, derefter gemmes svaret
-  en uge. *Nye forslag* spørger igen og undgår det, Claude har foreslået før. Se
+  stiller ud fra din smag, eller skriv hvad du er i humør til. Første gang spørges
+  automatisk. Claude arbejder i baggrunden med en fremskridtsbjælke, så du kan gå til en
+  anden side imens. *Nye forslag* spørger igen og undgår det, Claude har foreslået før.
+  Alle svar gemmes i 30 dage og kan findes igen under *Tidligere søgninger*. Se
   [Claudes forslag](#claudes-forslag).
 - **Uset i dit bibliotek**: det, du har, men ikke har set, sorteret efter hvor godt det
   passer til dig. Klik *Hvorfor?* for at se pointene.
@@ -135,6 +137,17 @@ TMDB-nøglen er derfor stærkt anbefalet. Uden den springes tjekket over.
   console.anthropic.com (betales efter forbrug) og `composer require anthropic-ai/sdk`.
 - **Slået fra**: siden åbner så på *Uset i dit bibliotek*.
 
+**Kø (Horizon / queue:work).** Claude-kaldet kører som jobbet `AskClaudeJob`, så siden ikke
+venter. Kør en worker (`php artisan horizon` eller `php artisan queue:work`). Bemærk:
+
+- Med Claude Code skal workeren køre som en bruger, der er logget ind i Claude Code.
+- Jobbet må køre op til 300 sekunder. Sæt `retry_after` for køforbindelsen i
+  `config/queue.php` til over 300 (fx 330), ellers kan jobbet blive startet to gange. I
+  Horizon skal supervisorens `timeout` også være mindst 300.
+- Vælg evt. egen forbindelse eller kø med `PLEX_RECOMMENDER_QUEUE_CONNECTION` og
+  `PLEX_RECOMMENDER_QUEUE`.
+- Med `QUEUE_CONNECTION=sync` kører det direkte i forespørgslen som før (siden venter).
+
 Fra terminalen: `php artisan plex claude show --niche=perler --wish="noget stille og nordisk"`.
 
 ## Claude Code (MCP)
@@ -197,6 +210,7 @@ noget i panelet:
 | `PLEX_RECOMMENDER_CLAUDE_BINARY` | Spørg Claude → Sti til Claude Code |
 | `PLEX_RECOMMENDER_CLAUDE_MODEL` | Spørg Claude → Model (standard `sonnet`) |
 | `ANTHROPIC_API_KEY` | Spørg Claude → API-nøgle |
+| `PLEX_RECOMMENDER_QUEUE_CONNECTION`, `PLEX_RECOMMENDER_QUEUE` | (kun .env) kø til Claude-jobbet |
 
 Indstillingerne gemmes krypteret med `APP_KEY` i `storage/app/plex-recommender.json`.
 

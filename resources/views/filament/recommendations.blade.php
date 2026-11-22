@@ -71,7 +71,7 @@
                 </div>
             </x-filament::section>
         @elseif ($source === 'claude')
-            @php($pending = $this->currentWish() !== $shownWish || ! $claude)
+            @php($changed = $this->currentWish() !== $shownWish || ! $claude)
             <form class="pr-claude" wire:submit="askClaude">
                 <div class="pr-questions">
                     @foreach ($this->questions() as $question => $options)
@@ -94,14 +94,40 @@
                         <option value="smal">Mindre kendte</option>
                         <option value="perler">Skjulte perler</option>
                     </select>
-                    <x-filament::button type="submit" :color="$pending ? 'primary' : 'gray'" :icon="$pending ? 'heroicon-o-sparkles' : 'heroicon-o-arrow-path'"
-                        wire:loading.attr="disabled" wire:target="askClaude,autoAskClaude">
-                        {{ $pending ? 'Find forslag' : 'Nye forslag' }}
+                    <x-filament::button type="submit" :color="$changed ? 'primary' : 'gray'" :icon="$changed ? 'heroicon-o-sparkles' : 'heroicon-o-arrow-path'"
+                        wire:loading.attr="disabled" wire:target="askClaude,autoAskClaude" :disabled="(bool) $this->pending">
+                        {{ $changed ? 'Find forslag' : 'Nye forslag' }}
                     </x-filament::button>
                 </div>
+                @if ($status = $this->claudeStatus())
+                    @php($elapsed = max(0, time() - ($status['started_at'] ?? $status['queued_at'] ?? time())))
+                    <div class="pr-progress" wire:poll.2s="checkClaude" wire:key="progress-{{ md5(json_encode($pending)) }}"
+                         x-data="{ elapsed: {{ $elapsed }}, est: {{ max(5, $status['estimate'] ?? 45) }}, running: {{ $status['state'] === 'running' ? 'true' : 'false' }}, timer: null,
+                                   init() { this.timer = setInterval(() => this.elapsed += 0.25, 250) }, destroy() { clearInterval(this.timer) } }">
+                        <div class="pr-progress-head">
+                            <span>
+                                @if ($status['state'] === 'queued')
+                                    {{ $elapsed > 20 ? 'Venter stadig på køen. Kører Horizon eller queue:work?' : 'Sat i kø …' }}
+                                @else
+                                    {{ match ($status['phase'] ?? null) {
+                                        'prompt' => 'Læser din historik …',
+                                        'verify' => 'Tjekker forslagene på TMDB …',
+                                        default => 'Claude finder forslag …',
+                                    } }}
+                                @endif
+                            </span>
+                            <span class="pr-muted" x-show="running" x-text="elapsed < est ? 'ca. ' + Math.max(1, Math.round(est - elapsed)) + ' sek. tilbage' : 'lidt længere end normalt …'"></span>
+                        </div>
+                        <div class="pr-progress-track">
+                            <div class="pr-progress-bar" :class="{ 'is-waiting': ! running }"
+                                 :style="running ? 'width:' + Math.min(96, 100 * (1 - Math.exp(-1.6 * elapsed / est))).toFixed(1) + '%' : ''"></div>
+                        </div>
+                        <p class="pr-muted">Du kan roligt gå til en anden side. Forslagene er klar, når du kommer tilbage.</p>
+                    </div>
+                @endif
                 <div class="pr-claude-status" wire:loading.flex wire:target="askClaude,autoAskClaude">
                     <x-filament::loading-indicator class="pr-spinner" />
-                    <span>Claude læser din historik og finder forslag… Det tager typisk under et minut.</span>
+                    <span>Starter …</span>
                 </div>
                 <div wire:loading.remove wire:target="askClaude,autoAskClaude">
                     @if ($claudeError)
@@ -123,6 +149,27 @@
                     @endif
                 </div>
             </form>
+
+            @php($history = $this->history())
+            @if (count($history) > 1)
+                <div class="pr-history">
+                    <span class="pr-question-label">Tidligere søgninger</span>
+                    <div class="pr-history-list">
+                        @foreach ($history as $h)
+                            <button type="button" wire:click="showSearch({{ $loop->index }})" wire:key="history-{{ md5($h['wish'].$h['niche']) }}"
+                                @class(['pr-history-item', 'is-active' => $claude && $h['wish'] === $shownWish && $h['niche'] === $niche])
+                                title="{{ implode(', ', $h['titles']) }}">
+                                <span class="pr-history-title">{{ $h['wish'] !== '' ? \Illuminate\Support\Str::limit($h['wish'], 60) : 'Standardforslag' }}</span>
+                                <span class="pr-history-meta">
+                                    {{ ['kendt' => 'Også kendte', 'smal' => 'Mindre kendte', 'perler' => 'Skjulte perler'][$h['niche']] ?? $h['niche'] }}
+                                    · {{ $h['count'] }} forslag
+                                    · {{ \Illuminate\Support\Carbon::createFromTimestamp($h['asked_at'])->locale('da')->diffForHumans() }}
+                                </span>
+                            </button>
+                        @endforeach
+                    </div>
+                </div>
+            @endif
 
             @if ($claude && $claude['taste_summary'])
                 <div class="pr-taste">

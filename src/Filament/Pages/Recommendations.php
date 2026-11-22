@@ -66,6 +66,12 @@ class Recommendations extends Page
     /** The wish (text + answers) behind the suggestions currently shown. */
     public string $shownWish = '';
 
+    /** Background request in progress: ['wish' => ..., 'niche' => ...]. */
+    public ?array $pending = null;
+
+    /** The automatic first search runs at most once per page visit. */
+    public bool $autoAsked = false;
+
     public ?string $claudeError = null;
 
     /** How niche Claude's suggestions should be: kendt | smal | perler. */
@@ -86,7 +92,9 @@ class Recommendations extends Page
     public function updatedType(): void
     {
         $this->genre = null;
-        $this->answers = []; // the questions differ between movies and shows
+        // The questions differ between movies and shows; show that type's last search.
+        [$this->answers, $this->wish, $this->shownWish, $this->pending, $this->claudeError] = [[], '', '', null, null];
+        $this->restoreLatest();
     }
 
     /** Toggle an answer chip. */
@@ -110,7 +118,7 @@ class Recommendations extends Page
         return implode('. ', $parts);
     }
 
-    /** Ask Claude (slow: runs Claude Code or calls the API). Result is cached. */
+    /** Ask Claude in the background (queue). With the sync queue it finishes right here. */
     public function askClaude(): void
     {
         @set_time_limit(300);
@@ -118,13 +126,85 @@ class Recommendations extends Page
         $wish = $this->currentWish();
         // Same wish as what's shown = "give me new ones"; a new wish may already be cached.
         $fresh = $wish === $this->shownWish && $this->claudeResult() !== null;
-        $result = app(ClaudeAdvisor::class)->recommend($this->type, $wish, $this->niche, 12, $fresh);
-        if (isset($result['error'])) {
-            $this->claudeError = $result['error'];
+        if (! $fresh && app(ClaudeAdvisor::class)->cached($this->type, $wish, $this->niche)) {
+            $this->shownWish = $wish;
+            app(ClaudeAdvisor::class)->setLatest($this->type, ['wish' => $wish, 'niche' => $this->niche, 'typed' => $this->wish, 'answers' => $this->answers]);
 
             return;
         }
-        $this->shownWish = $wish;
+
+        $this->pending = ['wish' => $wish, 'niche' => $this->niche];
+        app(ClaudeAdvisor::class)->dispatch($this->type, $wish, $this->niche, $fresh, ['typed' => $this->wish, 'answers' => $this->answers]);
+        $this->checkClaude();
+    }
+
+    /** Polled while a background request runs. */
+    public function checkClaude(): void
+    {
+        if (! $this->pending) {
+            return;
+        }
+        $status = app(ClaudeAdvisor::class)->status($this->type, $this->pending['wish'], $this->pending['niche']);
+        if (! $status) {
+            $this->pending = null;
+
+            return;
+        }
+        if ($status['state'] === 'done') {
+            [$this->shownWish, $this->niche] = [$this->pending['wish'], $this->pending['niche']];
+            $this->pending = null;
+        } elseif ($status['state'] === 'failed') {
+            $this->claudeError = $status['error'] ?? 'Ukendt fejl.';
+            $this->pending = null;
+        }
+    }
+
+    /** Status of the running background request, or null. */
+    public function claudeStatus(): ?array
+    {
+        return $this->pending ? app(ClaudeAdvisor::class)->status($this->type, $this->pending['wish'], $this->pending['niche']) : null;
+    }
+
+    /** @return list<array> earlier searches for the history list */
+    public function history(): array
+    {
+        return app(ClaudeAdvisor::class)->history($this->type);
+    }
+
+    /** Show an earlier search again (from the history list). */
+    public function showSearch(int $index): void
+    {
+        if (! $entry = $this->history()[$index] ?? null) {
+            return;
+        }
+        $this->niche = $entry['niche'];
+        $this->wish = $entry['typed'];
+        $this->answers = $entry['answers'];
+        $this->shownWish = $entry['wish'];
+        $this->claudeError = null;
+        app(ClaudeAdvisor::class)->setLatest($this->type, $entry);
+    }
+
+    /** Coming back to the page: show the last search, or its progress if it's still running. */
+    protected function restoreLatest(): void
+    {
+        $advisor = app(ClaudeAdvisor::class);
+        if (! $latest = $advisor->latest($this->type)) {
+            return;
+        }
+        $status = $advisor->status($this->type, $latest['wish'], $latest['niche']);
+        $running = $status && in_array($status['state'], ['queued', 'running'], true);
+        if (! $running && ! $advisor->cached($this->type, $latest['wish'], $latest['niche'])) {
+            return;
+        }
+        $this->niche = $latest['niche'];
+        $this->wish = (string) ($latest['typed'] ?? '');
+        $this->answers = (array) ($latest['answers'] ?? []);
+        if ($running) {
+            $this->pending = ['wish' => $latest['wish'], 'niche' => $latest['niche']];
+        } else {
+            $this->shownWish = $latest['wish'];
+        }
     }
 
     public function claudeEnabled(): bool
@@ -198,12 +278,19 @@ class Recommendations extends Page
     public function load(): void
     {
         $this->ready = true;
+        if ($this->isConnected() && $this->claudeEnabled()) {
+            $this->restoreLatest();
+        }
     }
 
     /** First visit without a saved answer: ask Claude right away (called from the view). */
     public function autoAskClaude(): void
     {
-        if ($this->source === 'claude' && $this->isConnected() && $this->claudeEnabled() && ! $this->claudeResult() && $this->shownWish === '' && $this->currentWish() === '') {
+        if ($this->autoAsked) {
+            return;
+        }
+        $this->autoAsked = true;
+        if ($this->source === 'claude' && $this->isConnected() && $this->claudeEnabled() && ! $this->claudeResult() && ! $this->pending && $this->shownWish === '' && $this->currentWish() === '') {
             $this->askClaude();
         }
     }

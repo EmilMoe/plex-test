@@ -9,7 +9,9 @@ use EmilMoe\PlexRecommender\TasteProfile;
 use EmilMoe\PlexRecommender\Tests\TestCase;
 use Filament\Facades\Filament;
 use Illuminate\Process\PendingProcess;
+use EmilMoe\PlexRecommender\Claude\AskClaudeJob;
 use Illuminate\Support\Facades\Process;
+use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
 
 class ClaudeTest extends TestCase
@@ -199,6 +201,79 @@ class ClaudeTest extends TestCase
             ->assertSee('To drenge og deres fædre.')
             ->assertSee('Samme moralske tyngde.')
             ->assertSee('1 t 53 min');
+    }
+
+    public function test_runs_in_the_queue_with_progress_so_you_can_leave_the_page(): void
+    {
+        Filament::setCurrentPanel('admin');
+        Queue::fake();
+        $this->fakeClaude([$this->rec('Hævnen', 2010)]);
+
+        $page = Livewire::test(Recommendations::class)
+            ->call('load')
+            ->call('autoAskClaude')
+            ->assertSet('pending', ['wish' => '', 'niche' => 'smal'])
+            ->assertSee('Sat i kø')
+            ->assertSee('Du kan roligt gå til en anden side');
+        Queue::assertPushed(AskClaudeJob::class, 1);
+
+        // A second click while it runs doesn't queue another job.
+        $page->call('askClaude');
+        Queue::assertPushed(AskClaudeJob::class, 1);
+
+        // Coming back while it runs shows the progress again.
+        Livewire::test(Recommendations::class)->call('load')->assertSet('pending', ['wish' => '', 'niche' => 'smal']);
+
+        // The worker finishes; the next poll shows the result.
+        Queue::pushedJobs()[AskClaudeJob::class][0]['job']->handle($this->advisor());
+        $page->call('checkClaude')
+            ->assertSet('pending', null)
+            ->assertSee('Hævnen');
+        $this->assertGreaterThan(0, $this->advisor()->estimate());
+    }
+
+    public function test_status_reports_phases_and_errors(): void
+    {
+        Process::fake(['*' => Process::result('', 'boom', 1)]);
+        Queue::fake();
+
+        $this->advisor()->dispatch('movie', 'x', 'smal');
+        $this->assertSame('queued', $this->advisor()->status('movie', 'x', 'smal')['state']);
+
+        $this->advisor()->runQueued('movie', 'x', 'smal', false);
+        $status = $this->advisor()->status('movie', 'x', 'smal');
+        $this->assertSame('failed', $status['state']);
+        $this->assertStringContainsString('boom', $status['error']);
+    }
+
+    public function test_earlier_searches_can_be_browsed_and_the_last_one_is_restored(): void
+    {
+        Filament::setCurrentPanel('admin');
+        $this->fakeClaude([$this->rec('Hævnen', 2010)]);
+
+        $page = Livewire::test(Recommendations::class)
+            ->call('load')
+            ->call('autoAskClaude')
+            ->call('pick', 'Stemning', 'Rørende')
+            ->call('askClaude')
+            ->assertSet('shownWish', 'Stemning: Rørende')
+            ->assertSee('Tidligere søgninger')
+            ->assertSee('Standardforslag');
+
+        $history = $this->advisor()->history('movie');
+        $this->assertSame(['Stemning: Rørende', ''], array_column($history, 'wish'));
+
+        // Leaving and coming back shows the last search, not a new one.
+        Livewire::test(Recommendations::class)
+            ->call('load')
+            ->assertSet('shownWish', 'Stemning: Rørende')
+            ->assertSet('answers', ['Stemning' => 'Rørende'])
+            ->call('autoAskClaude');
+
+        // Back to the first search, with its form state; that's now what's restored.
+        $page->call('showSearch', 1)->assertSet('shownWish', '')->assertSet('answers', []);
+        Livewire::test(Recommendations::class)->call('load')->assertSet('shownWish', '');
+        Process::assertRanTimes(fn () => true, 2);
     }
 
     public function test_falls_back_to_library_tab_when_claude_is_off(): void

@@ -93,8 +93,8 @@ class ClaudeAdvisor
         ];
     }
 
-    /** Answers are kept this long; "Spørg igen" always asks fresh. */
-    public const CACHE_DAYS = 7;
+    /** Answers are kept this long (so earlier searches can be browsed); "Nye forslag" always asks fresh. */
+    public const CACHE_DAYS = 30;
 
     public function __construct(
         protected RecommenderService $svc,
@@ -135,8 +135,9 @@ class ClaudeAdvisor
     /**
      * @return array{taste_summary: string, recommendations: list<array>, driver: string, asked_at: int, niche: string, filtered: array}|array{error: string}
      */
-    public function recommend(string $type, ?string $wish = null, ?string $niche = null, int $limit = 12, bool $fresh = false): array
+    public function recommend(string $type, ?string $wish = null, ?string $niche = null, int $limit = 12, bool $fresh = false, ?callable $phase = null): array
     {
+        $phase ??= fn (string $p) => null;
         $type = RecommenderService::normalizeType($type);
         $wish = $this->cleanWish($wish);
         $niche = self::niche($niche);
@@ -148,9 +149,13 @@ class ClaudeAdvisor
             return $hit;
         }
 
+        $started = microtime(true);
         try {
+            $phase('prompt');
             // Ask for extra titles: some are dropped as seen, too popular or not found.
-            $text = $driver->ask($this->systemPrompt(), $this->prompt($type, $wish, $niche, $limit + 8), self::SCHEMA);
+            $prompt = $this->prompt($type, $wish, $niche, $limit + 8);
+            $phase('claude');
+            $text = $driver->ask($this->systemPrompt(), $prompt, self::SCHEMA);
         } catch (ClaudeException $e) {
             return ['error' => $e->getMessage()];
         }
@@ -160,7 +165,9 @@ class ClaudeAdvisor
             return ['error' => 'Kunne ikke forstå svaret fra Claude. Prøv igen.'];
         }
 
+        $phase('verify');
         [$recs, $filtered] = $this->verify($type, $niche, $data['recommendations']);
+        $this->recordDuration(microtime(true) - $started);
 
         $result = [
             'taste_summary' => (string) ($data['taste_summary'] ?? ''),
@@ -175,6 +182,159 @@ class ClaudeAdvisor
         $this->remember($type, array_column($result['recommendations'], 'title'));
 
         return $result;
+    }
+
+    // ---------------------------------------------------------------- queue
+
+    /**
+     * Ask in the background (queue job), so the user can leave the page.
+     * With the "sync" queue driver this runs right away, like recommend().
+     *
+     * @param  array{typed?: string, answers?: array}  $ui  form state, to restore the page later
+     */
+    public function dispatch(string $type, ?string $wish, ?string $niche, bool $fresh = false, array $ui = []): array
+    {
+        $type = RecommenderService::normalizeType($type);
+        $wish = $this->cleanWish($wish);
+        $niche = self::niche($niche);
+
+        $current = $this->status($type, $wish, $niche);
+        if ($current && in_array($current['state'], ['queued', 'running'], true)) {
+            return $current; // already on its way
+        }
+
+        $entry = ['wish' => (string) $wish, 'niche' => $niche, 'typed' => (string) ($ui['typed'] ?? ''), 'answers' => (array) ($ui['answers'] ?? [])];
+        $this->cache->forever("plex-recommender:claude:latest:{$type}", $entry);
+        $this->addToHistory($type, $entry);
+        $this->setStatus($type, $wish, $niche, ['state' => 'queued', 'phase' => null]);
+
+        $job = new AskClaudeJob($type, $wish, $niche, $fresh);
+        $pending = dispatch($job);
+        if ($connection = config('plex-recommender.claude.queue_connection')) {
+            $pending->onConnection($connection);
+        }
+        if ($queue = config('plex-recommender.claude.queue')) {
+            $pending->onQueue($queue);
+        }
+        try {
+            unset($pending); // dispatches now (the sync driver runs the job right here)
+        } catch (Throwable $e) {
+            $this->markFailed($type, $wish, $niche, 'Claude-jobbet fejlede: '.$e->getMessage());
+        }
+
+        return $this->status($type, $wish, $niche) ?? ['state' => 'queued'];
+    }
+
+    /** Run by AskClaudeJob. */
+    public function runQueued(string $type, ?string $wish, string $niche, bool $fresh): void
+    {
+        $this->setStatus($type, $wish, $niche, ['state' => 'running', 'phase' => 'prompt', 'started_at' => time()]);
+        $result = $this->recommend($type, $wish, $niche, 12, $fresh, function (string $phase) use ($type, $wish, $niche) {
+            $this->setStatus($type, $wish, $niche, ['phase' => $phase]);
+        });
+        $this->setStatus($type, $wish, $niche, isset($result['error'])
+            ? ['state' => 'failed', 'error' => $result['error']]
+            : ['state' => 'done']);
+    }
+
+    /**
+     * Background status: state queued|running|done|failed, phase, queued_at,
+     * started_at, error, estimate (seconds). Stale jobs are reported as failed.
+     */
+    public function status(string $type, ?string $wish, ?string $niche): ?array
+    {
+        $status = $this->cache->get($this->statusKey(RecommenderService::normalizeType($type), $this->cleanWish($wish), self::niche($niche)));
+        if (! $status) {
+            return null;
+        }
+        $status['estimate'] = $this->estimate();
+        $since = $status['started_at'] ?? $status['queued_at'] ?? time();
+        if ($status['state'] === 'running' && time() - $since > 600) {
+            return ['state' => 'failed', 'error' => 'Claude blev ikke færdig. Prøv igen.'] + $status;
+        }
+
+        return $status;
+    }
+
+    public function markFailed(string $type, ?string $wish, string $niche, string $error): void
+    {
+        $this->setStatus($type, $this->cleanWish($wish), self::niche($niche), ['state' => 'failed', 'error' => $error]);
+    }
+
+    /** Remember which search is shown, so it's restored when coming back. */
+    public function setLatest(string $type, array $entry): void
+    {
+        $this->cache->forever('plex-recommender:claude:latest:'.RecommenderService::normalizeType($type), [
+            'wish' => (string) ($entry['wish'] ?? ''), 'niche' => self::niche($entry['niche'] ?? null),
+            'typed' => (string) ($entry['typed'] ?? ''), 'answers' => (array) ($entry['answers'] ?? []),
+        ]);
+    }
+
+    /** What was asked last (to restore the page when coming back). */
+    public function latest(string $type): ?array
+    {
+        return $this->cache->get('plex-recommender:claude:latest:'.RecommenderService::normalizeType($type));
+    }
+
+    /**
+     * Earlier searches that still have a saved answer, newest first.
+     *
+     * @return list<array{wish: string, niche: string, typed: string, answers: array, asked_at: int, count: int, titles: list<string>}>
+     */
+    public function history(string $type, int $limit = 12): array
+    {
+        $type = RecommenderService::normalizeType($type);
+        $out = [];
+        foreach ($this->cache->get("plex-recommender:claude:history:{$type}", []) as $entry) {
+            if ($result = $this->cached($type, $entry['wish'], $entry['niche'])) {
+                $out[] = $entry + [
+                    'asked_at' => $result['asked_at'],
+                    'count' => count($result['recommendations']),
+                    'titles' => array_slice(array_column($result['recommendations'], 'title'), 0, 3),
+                ];
+            }
+        }
+        usort($out, fn ($a, $b) => $b['asked_at'] <=> $a['asked_at']);
+
+        return array_slice($out, 0, $limit);
+    }
+
+    protected function addToHistory(string $type, array $entry): void
+    {
+        $key = "plex-recommender:claude:history:{$type}";
+        $same = fn ($e) => mb_strtolower($e['wish']) === mb_strtolower($entry['wish']) && $e['niche'] === $entry['niche'];
+        $list = array_values(array_filter($this->cache->get($key, []), fn ($e) => ! $same($e)));
+        $this->cache->forever($key, array_slice([$entry, ...$list], 0, 30));
+    }
+
+    /** Expected seconds for an answer: average of the last runs, 45 s until we know. */
+    public function estimate(): int
+    {
+        $runs = $this->cache->get('plex-recommender:claude:durations:'.$this->settings->claudeDriver(), []);
+
+        return $runs ? (int) round(array_sum($runs) / count($runs)) : 45;
+    }
+
+    protected function recordDuration(float $seconds): void
+    {
+        $key = 'plex-recommender:claude:durations:'.$this->settings->claudeDriver();
+        $runs = array_slice([...$this->cache->get($key, []), max(1.0, $seconds)], -10);
+        $this->cache->forever($key, $runs);
+    }
+
+    protected function setStatus(string $type, ?string $wish, string $niche, array $values): void
+    {
+        $key = $this->statusKey($type, $wish, $niche);
+        $status = array_merge($this->cache->get($key, []), $values);
+        if (($values['state'] ?? null) === 'queued') {
+            $status = ['state' => 'queued', 'phase' => null, 'queued_at' => time()];
+        }
+        $this->cache->put($key, $status, now()->addMinutes(30));
+    }
+
+    protected function statusKey(string $type, ?string $wish, string $niche): string
+    {
+        return 'plex-recommender:claude:status:'.md5($type.'|'.mb_strtolower((string) $wish).'|'.$niche.'|'.$this->settings->claudeDriver());
     }
 
     /**

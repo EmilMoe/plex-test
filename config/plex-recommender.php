@@ -67,6 +67,11 @@ return [
         // Tom = sonnet (Claude Code) / claude-sonnet-5-5 (API). Hurtig og god nok til forslag.
         'model' => env('PLEX_RECOMMENDER_CLAUDE_MODEL'),
         'api_key' => env('ANTHROPIC_API_KEY'),
+        // Forslag hentes i køen (Horizon / queue:work), så man kan forlade siden.
+        // null = appens standard. Med QUEUE_CONNECTION=sync venter siden i stedet.
+        // Husk: køens retry_after skal være over 300 sekunder.
+        'queue_connection' => env('PLEX_RECOMMENDER_QUEUE_CONNECTION'),
+        'queue' => env('PLEX_RECOMMENDER_QUEUE'),
     ],
 
     'profile' => [
