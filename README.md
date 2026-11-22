@@ -142,8 +142,10 @@ venter. Kør en worker (`php artisan horizon` eller `php artisan queue:work`). B
 
 - Med Claude Code skal workeren køre som en bruger, der er logget ind i Claude Code.
 - Jobbet må køre op til 300 sekunder. Sæt `retry_after` for køforbindelsen i
-  `config/queue.php` til over 300 (fx 330), ellers kan jobbet blive startet to gange. I
-  Horizon skal supervisorens `timeout` også være mindst 300.
+  `config/queue.php` til over 300 (fx 330). Standarden er 90, og så giver køen jobbet til en
+  ny worker, mens Claude stadig svarer. Pakken springer de ekstra forsøg over (Claude bliver
+  ikke spurgt to gange), men det er stadig spild. I Horizon skal supervisorens `timeout`
+  også være mindst 300.
 - Vælg evt. egen forbindelse eller kø med `PLEX_RECOMMENDER_QUEUE_CONNECTION` og
   `PLEX_RECOMMENDER_QUEUE`.
 - Med `QUEUE_CONNECTION=sync` kører det direkte i forespørgslen som før (siden venter).

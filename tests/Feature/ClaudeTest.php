@@ -235,6 +235,30 @@ class ClaudeTest extends TestCase
         $this->assertGreaterThan(0, $this->advisor()->estimate());
     }
 
+    public function test_a_redelivered_job_does_not_ask_claude_again_or_fail(): void
+    {
+        // retry_after shorter than the Claude call: the queue hands the job to a second worker.
+        Queue::fake();
+        $this->fakeClaude([$this->rec('Hævnen', 2010)]);
+        $this->advisor()->dispatch('movie', null, 'smal');
+        $job = Queue::pushedJobs()[AskClaudeJob::class][0]['job'];
+        $job->handle($this->advisor());
+        Process::assertRanTimes(fn () => true, 1);
+
+        $copy = clone $job;
+        $copy->setJob(\Mockery::mock(\Illuminate\Contracts\Queue\Job::class, ['attempts' => 2]));
+        $copy->handle($this->advisor());
+        Process::assertRanTimes(fn () => true, 1);
+
+        // Running out of attempts doesn't overwrite the result.
+        $copy->failed(new \Illuminate\Queue\MaxAttemptsExceededException('too many'));
+        $this->assertSame('done', $this->advisor()->status('movie', null, 'smal')['state']);
+
+        // A real error still fails it.
+        $copy->failed(new \RuntimeException('boom'));
+        $this->assertSame('failed', $this->advisor()->status('movie', null, 'smal')['state']);
+    }
+
     public function test_status_reports_phases_and_errors(): void
     {
         Process::fake(['*' => Process::result('', 'boom', 1)]);
