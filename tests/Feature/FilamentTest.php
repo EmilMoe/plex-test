@@ -33,10 +33,13 @@ class FilamentTest extends TestCase
             ->call('load')
             ->assertSee('Dune')
             ->assertSee('Instruktør: Denis Villeneuve')
+            ->assertSee('Sådan finder vi forslag')
+            ->assertSee('Hvorfor?')
             ->assertDontSee('Blade Runner 2049')
             ->set('source', 'new')
             ->assertSee('Ex Machina')
             ->assertSee('Fordi du så')
+            ->assertSee('TMDB-match')
             ->set('type', 'show')
             ->set('source', 'library')
             ->assertSee('Dark');

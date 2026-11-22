@@ -115,38 +115,84 @@ class TasteProfile
         return min(1.0, $vals[0] * 0.7 + array_sum(array_slice($vals, 1, 2)) * 0.15);
     }
 
-    /** @return array{0: float, 1: list<string>} score and human-readable reasons */
+    /**
+     * Score an item against the profile: [score, human-readable reasons, per-factor breakdown].
+     *
+     * @return array{0: float, 1: list<string>, 2: list<array{label: string, points: float, detail: string}>}
+     */
     public function score(MediaItem $item): array
     {
-        $reasons = [];
-        $s = $this->genreMatch($item->genres) * 3.0;
+        $reasons = $parts = [];
+        $add = function (string $label, float $points, string $detail) use (&$parts) {
+            if ($points > 0) {
+                $parts[] = ['label' => $label, 'points' => round($points, 2), 'detail' => $detail];
+            }
+        };
 
+        $genrePoints = $this->genreMatch($item->genres) * 3.0;
         $topGenres = array_values(array_filter($item->genres, fn ($g) => ($this->genres[mb_strtolower($g)] ?? 0) >= 0.4));
         if ($topGenres) {
             $reasons[] = 'genre: '.implode(', ', array_slice($topGenres, 0, 3));
         }
+        $add('Genre', $genrePoints, implode(', ', array_slice($item->genres, 0, 3)));
 
         $dHits = array_values(array_filter($item->directors, fn ($d) => isset($this->directors[$d])));
+        $directorPoints = 0.0;
         if ($dHits) {
-            $s += max(array_map(fn ($d) => $this->directors[$d], $dHits)) * 1.5;
+            $directorPoints = max(array_map(fn ($d) => $this->directors[$d], $dHits)) * 1.5;
             $reasons[] = 'instruktør: '.implode(', ', $dHits);
+            $add('Instruktør', $directorPoints, implode(', ', $dHits));
         }
 
         $aHits = array_values(array_filter($item->actors, fn ($a) => isset($this->actors[$a])));
+        $actorPoints = 0.0;
         if ($aHits) {
-            $s += min(1.5, array_sum(array_map(fn ($a) => $this->actors[$a], $aHits)));
+            $actorPoints = min(1.5, array_sum(array_map(fn ($a) => $this->actors[$a], $aHits)));
             $reasons[] = 'skuespillere: '.implode(', ', array_slice($aHits, 0, 3));
+            $add('Skuespillere', $actorPoints, implode(', ', array_slice($aHits, 0, 3)));
         }
 
+        $decadePoints = 0.0;
         if ($item->year) {
-            $s += ($this->decades[intdiv($item->year, 10) * 10 .'s'] ?? 0.0) * 0.4;
+            $decade = intdiv($item->year, 10) * 10 .'s';
+            $decadePoints = ($this->decades[$decade] ?? 0.0) * 0.4;
+            $add('Årti', $decadePoints, $decade);
         }
 
+        $qualityPoints = 0.0;
         if ($quality = $item->audienceRating ?? $item->rating) {
-            $s += ($quality / 10) * 0.8;
+            $qualityPoints = ($quality / 10) * 0.8;
+            $add('Bedømmelse', $qualityPoints, number_format($quality, 1, ',', '').'/10');
         }
 
-        return [round($s, 3), $reasons];
+        // Always give at least one reason, even when nothing crossed the thresholds above.
+        if (! $reasons) {
+            $best = $this->bestGenre($item->genres);
+            $reasons[] = match (true) {
+                $best !== null => 'minder om noget du ser: '.$best,
+                $decadePoints > 0 => 'fra et årti du ser meget: '.$decade,
+                $qualityPoints > 0 => 'godt bedømt ('.number_format($quality, 1, ',', '').'/10)',
+                default => 'ikke set endnu, men intet tydeligt match med din smag',
+            };
+        }
+
+        $s = $genrePoints + $directorPoints + $actorPoints + $decadePoints + $qualityPoints;
+
+        return [round($s, 3), $reasons, $parts];
+    }
+
+    /** The item's genre that ranks highest in the profile, if any matches at all. */
+    public function bestGenre(array $genreNames): ?string
+    {
+        $best = null;
+        $bestVal = 0.0;
+        foreach ($genreNames as $g) {
+            if (($v = $this->genres[mb_strtolower($g)] ?? 0.0) > $bestVal) {
+                [$best, $bestVal] = [$g, $v];
+            }
+        }
+
+        return $best;
     }
 
     public function summary(int $topN = 10): array

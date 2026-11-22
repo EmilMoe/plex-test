@@ -63,3 +63,30 @@
 .dark .pr-list li { border-color: rgb(255 255 255 / .06); color: #fff; }
 .pr-list li:first-child { border-top: 0; }
 .pr-list li > span:first-child::before { content: counter(pr) "."; display: inline-block; min-width: 1.6rem; color: var(--gray-400); }
+
+/* Explanation panel + per-card "why" breakdown */
+.pr-explain { border-radius: .75rem; background: #fff; outline: 1px solid rgb(3 7 18 / .05); box-shadow: 0 1px 2px rgb(0 0 0 / .05); font-size: .875rem; color: var(--gray-700); }
+.dark .pr-explain { background: var(--gray-900); outline-color: rgb(255 255 255 / .1); color: var(--gray-300); }
+.pr-explain > summary { cursor: pointer; padding: .75rem 1rem; font-weight: 600; color: var(--gray-950); }
+.dark .pr-explain > summary { color: #fff; }
+.pr-explain-body { padding: 0 1rem 1rem; display: flex; flex-direction: column; gap: .5rem; line-height: 1.5; }
+.pr-explain-body p, .pr-explain-body ol { margin: 0; }
+.pr-explain-body ol { padding-left: 1.25rem; list-style: decimal; display: flex; flex-direction: column; gap: .35rem; }
+.pr-why { margin-top: .4rem; font-size: .75rem; }
+.pr-why > summary { cursor: pointer; color: var(--gray-500); display: flex; justify-content: space-between; gap: .5rem; list-style: none; }
+.pr-why > summary::-webkit-details-marker { display: none; }
+.pr-why > summary::before { content: '▸'; margin-right: .1rem; }
+.pr-why[open] > summary::before { content: '▾'; }
+.pr-why > summary:hover { color: var(--gray-950); }
+.dark .pr-why > summary { color: var(--gray-400); }
+.dark .pr-why > summary:hover { color: #fff; }
+.pr-score { margin-left: auto; font-variant-numeric: tabular-nums; }
+.pr-why-list { margin: .35rem 0 0; display: flex; flex-direction: column; gap: .2rem; }
+.pr-why-row { display: flex; justify-content: space-between; gap: .5rem; }
+.pr-why-row dt { color: var(--gray-700); min-width: 0; }
+.dark .pr-why-row dt { color: var(--gray-300); }
+.pr-why-row dt span { display: block; color: var(--gray-500); }
+.pr-why-row dd { margin: 0; font-variant-numeric: tabular-nums; color: var(--gray-950); white-space: nowrap; }
+.dark .pr-why-row dd { color: #fff; }
+.pr-why-row.is-sub { padding-left: .6rem; }
+.pr-why-row.is-sub dt, .pr-why-row.is-sub dd { color: var(--gray-500); }

@@ -24,6 +24,21 @@
             @endif
         </div>
 
+        @if ($connected)
+            <details class="pr-explain">
+                <summary>Sådan finder vi forslag</summary>
+                <div class="pr-explain-body">
+                    <p>Forslagene beregnes direkte ud fra din Plex-historik. Der bruges ingen AI.</p>
+                    <ol>
+                        <li><strong>Din smagsprofil.</strong> Alt du har set, vægtes efter hvor meget du har engageret dig: genset film og serier du har set mange afsnit af tæller mere, dine egne stjerner i Plex hæver eller sænker vægten, og nyere visninger tæller mere end gamle. Ud fra det får genrer, instruktører, skuespillere og årtier en vægt. Se den under <em>Smagsprofil</em>.</li>
+                        <li><strong>Fra dit bibliotek</strong> giver usete titler point for genre (op til 3), instruktør (op til 1,5), skuespillere (op til 1,5), årti (op til 0,4) og bedømmelse (op til 0,8).</li>
+                        <li><strong>Værd at skaffe</strong> tager dine mest sete titler og henter TMDB's lignende titler. En titel der går igen hos flere af dine favoritter, scorer højere. Derefter ganges der med hvor godt genren passer, og med bedømmelsen på TMDB. Titler du allerede har, sorteres fra.</li>
+                    </ol>
+                    <p>Klik på <em>Hvorfor?</em> på et kort for at se præcis hvor pointene kommer fra.</p>
+                </div>
+            </details>
+        @endif
+
         @if (! $connected)
             <x-filament::section>
                 <div class="pr-empty">
@@ -98,6 +113,19 @@
                             @endforeach
                             @if ($card['summary'])
                                 <p class="pr-summary">{{ $card['summary'] }}</p>
+                            @endif
+                            @if (! empty($card['why']))
+                                <details class="pr-why">
+                                    <summary>Hvorfor? <span class="pr-score">{{ number_format($card['score'], 2, ',', '') }} point</span></summary>
+                                    <dl class="pr-why-list">
+                                        @foreach ($card['why'] as $row)
+                                            <div @class(['pr-why-row', 'is-sub' => $row['sub'] ?? false])>
+                                                <dt>{{ $row['label'] }}@if ($row['label'] && $row['detail'])<span>{{ $row['detail'] }}</span>@elseif ($row['detail']){{ $row['detail'] }}@endif</dt>
+                                                <dd>{{ $row['value'] }}</dd>
+                                            </div>
+                                        @endforeach
+                                    </dl>
+                                </details>
                             @endif
                         </div>
                     </article>

@@ -49,6 +49,12 @@ class RecommenderTest extends TestCase
         $this->assertSame('Dune', $titles[0]);
         $this->assertNotContains('Blade Runner 2049', $titles);
         $this->assertStringContainsString('Denis Villeneuve', implode(' ', $recs[0]['why']));
+        $labels = array_column($recs[0]['breakdown'], 'label');
+        $this->assertContains('Instruktør', $labels);
+        $this->assertEqualsWithDelta($recs[0]['score'], array_sum(array_column($recs[0]['breakdown'], 'points')), 0.05);
+        foreach ($recs as $r) {
+            $this->assertNotEmpty($r['why'], "{$r['title']} has no reason");
+        }
 
         $this->assertSame(['Dark'], array_column($this->svc()->unwatchedInLibrary('serier'), 'title'));
         $this->assertContains('Friends', array_column($this->svc()->unwatchedInLibrary('show', 20, null, true), 'title'));
@@ -64,6 +70,9 @@ class RecommenderTest extends TestCase
         $this->assertSame('Ex Machina', $titles[0]);
         $this->assertLessThan(array_search('Rom-com Deluxe', $titles), array_search('Ex Machina', $titles));
         $this->assertNotEmpty($out['recommendations'][0]['because_you_watched']);
+        $b = $out['recommendations'][0]['breakdown'];
+        $this->assertSame(count($out['recommendations'][0]['because_you_watched']), $b['seed_count']);
+        $this->assertEqualsWithDelta($out['recommendations'][0]['score'], $b['tmdb_match'] * $b['genre_factor'] * $b['quality_factor'], 0.05);
     }
 
     public function test_recommend_new_without_tmdb(): void

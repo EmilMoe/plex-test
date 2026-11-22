@@ -194,8 +194,8 @@ class RecommenderService
             if ($genre && ! in_array(mb_strtolower($genre), array_map('mb_strtolower', $item->genres), true)) {
                 continue;
             }
-            [$score, $why] = $profile->score($item);
-            $candidates[] = [...$item->brief(), 'score' => $score, 'why' => $why, 'summary' => mb_substr($item->summary, 0, 300), 'thumb' => $item->thumb];
+            [$score, $why, $breakdown] = $profile->score($item);
+            $candidates[] = [...$item->brief(), 'score' => $score, 'why' => $why, 'breakdown' => $breakdown, 'summary' => mb_substr($item->summary, 0, 300), 'thumb' => $item->thumb];
         }
         usort($candidates, fn ($a, $b) => $b['score'] <=> $a['score']);
 
@@ -224,13 +224,14 @@ class RecommenderService
         $seedItems = array_slice(array_values(array_filter($profile->topTitles, fn ($t) => $t[0]->type === $type)), 0, $seeds);
         $genreMap = $tmdb->genreNames($type);
 
-        $scores = $because = $info = $usedSeeds = [];
+        $scores = $because = $info = $usedSeeds = $seedWeights = [];
         foreach ($seedItems as [$item, $weight]) {
             $tmdbId = $item->tmdbId ?? $tmdb->findTmdbId($type, $item->imdbId, $item->tvdbId);
             if (! $tmdbId) {
                 continue;
             }
             $usedSeeds[] = $item->label();
+            $seedWeights[$item->title] = $weight;
             foreach ($tmdb->recommendations($type, $tmdbId) as $pos => $rec) {
                 $id = $rec['id'];
                 $scores[$id] = ($scores[$id] ?? 0) + $weight * (1.0 - $pos / 25);
@@ -259,7 +260,10 @@ class RecommenderService
             $genreIds = $rec['genre_ids'] ?? [];
             $allGenreNames = array_merge(...array_map(fn ($g) => $genreMap[$g] ?? [], $genreIds ?: [0]));
             $quality = ($rec['vote_average'] ?? 0) / 10;
-            $score = $base * (0.6 + 0.8 * $profile->genreMatch($allGenreNames)) * (0.7 + 0.6 * $quality);
+            $genreFactor = 0.6 + 0.8 * $profile->genreMatch($allGenreNames);
+            $qualityFactor = 0.7 + 0.6 * $quality;
+            $score = $base * $genreFactor * $qualityFactor;
+            $seedTitles = array_values(array_unique($because[$id]));
 
             $results[] = [
                 'title' => $title,
@@ -268,8 +272,15 @@ class RecommenderService
                 'genres' => array_values(array_filter(array_map(fn ($g) => $genreMap[$g][0] ?? null, $genreIds))),
                 'tmdb_rating' => $rec['vote_average'] ?? null,
                 'votes' => $rec['vote_count'] ?? null,
-                'because_you_watched' => array_slice(array_unique($because[$id]), 0, 4),
+                'because_you_watched' => array_slice($seedTitles, 0, 4),
                 'score' => round($score, 3),
+                'breakdown' => [
+                    'tmdb_match' => round($base, 2),
+                    'seed_count' => count($seedTitles),
+                    'seeds' => array_map(fn ($t) => ['title' => $t, 'engagement' => round($seedWeights[$t] ?? 0, 2)], array_slice($seedTitles, 0, 5)),
+                    'genre_factor' => round($genreFactor, 2),
+                    'quality_factor' => round($qualityFactor, 2),
+                ],
                 'overview' => mb_substr($rec['overview'] ?? '', 0, 300),
                 'url' => 'https://www.themoviedb.org/'.TmdbClient::kind($type)."/{$id}",
                 'poster' => ! empty($rec['poster_path']) ? 'https://image.tmdb.org/t/p/w342'.$rec['poster_path'] : null,

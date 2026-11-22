@@ -110,9 +110,11 @@ class Recommendations extends Page
                     'poster' => $r['poster'] ?? null,
                     'badge' => $r['tmdb_rating'] ? number_format($r['tmdb_rating'], 1, ',', '') : null,
                     'genres' => $r['genres'],
-                    'reasons' => $r['because_you_watched'] ? ['Fordi du så '.$this->list($r['because_you_watched'])] : [],
+                    'reasons' => $r['because_you_watched'] ? ['Fordi du så '.$this->list($r['because_you_watched'])] : ['Populær blandt folk med lignende smag'],
                     'summary' => $r['overview'],
                     'url' => $r['url'],
+                    'score' => $r['score'],
+                    'why' => $this->newBreakdown($r),
                 ], $result['recommendations']);
             }
 
@@ -126,6 +128,12 @@ class Recommendations extends Page
                 'summary' => $r['summary'],
                 'url' => null,
                 'progress' => $r['type'] === MediaItem::SHOW && ($r['status'] ?? '') === 'in_progress' ? $r['episodes_watched'] : null,
+                'score' => $r['score'],
+                'why' => array_map(fn ($p) => [
+                    'label' => $p['label'],
+                    'detail' => $p['detail'],
+                    'value' => '+'.$this->num($p['points']),
+                ], $r['breakdown'] ?? []),
             ], $svc->unwatchedInLibrary($this->type, 24, $this->genre));
         } catch (Throwable $e) {
             $this->error = $e->getMessage();
@@ -155,6 +163,34 @@ class Recommendations extends Page
         } catch (Throwable) {
             return [];
         }
+    }
+
+    /** Human-readable explanation rows for a TMDB recommendation. */
+    protected function newBreakdown(array $r): array
+    {
+        $b = $r['breakdown'] ?? [];
+        if (! $b) {
+            return [];
+        }
+        $rows = [[
+            'label' => 'TMDB-match',
+            'detail' => $b['seed_count'] === 1
+                ? 'Anbefalet ud fra 1 af dine favoritter'
+                : "Anbefalet ud fra {$b['seed_count']} af dine favoritter",
+            'value' => $this->num($b['tmdb_match']),
+        ]];
+        foreach ($b['seeds'] as $seed) {
+            $rows[] = ['label' => '', 'detail' => $seed['title'], 'value' => 'vægt '.$this->num($seed['engagement']), 'sub' => true];
+        }
+        $rows[] = ['label' => 'Genre', 'detail' => 'Hvor godt genren passer din profil', 'value' => '×'.$this->num($b['genre_factor'])];
+        $rows[] = ['label' => 'Bedømmelse', 'detail' => $r['tmdb_rating'] ? number_format($r['tmdb_rating'], 1, ',', '').'/10 på TMDB' : 'Ingen bedømmelse', 'value' => '×'.$this->num($b['quality_factor'])];
+
+        return $rows;
+    }
+
+    protected function num(float $n): string
+    {
+        return number_format($n, 2, ',', '');
     }
 
     protected function list(array $titles): string
