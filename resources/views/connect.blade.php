@@ -22,8 +22,12 @@
             <dt>Adresse</dt><dd>{{ $store->url() }}</dd>
             @if ($store->get('connected_at')) <dt>Forbundet</dt><dd>{{ \Illuminate\Support\Carbon::parse($store->get('connected_at'))->format('d.m.Y H:i') }}</dd> @endif
         </dl>
-        @if ($store->usesConfig())
-            <p>Forbindelsen kommer fra <code>PLEX_URL</code>/<code>PLEX_TOKEN</code> i .env. Fjern dem for at bruge login i stedet.</p>
+        @if (! $store->isStored('server_token'))
+            <p>Forbindelsen kommer fra <code>PLEX_URL</code>/<code>PLEX_TOKEN</code> i .env. Log ind med Plex for at bruge din konto i stedet.</p>
+            <form method="POST" action="{{ route('plex-recommender.connect') }}">
+                @csrf
+                <button class="btn btn-plex" type="submit">Log ind med Plex</button>
+            </form>
         @else
             <form method="POST" action="{{ route('plex-recommender.connect') }}">
                 @csrf

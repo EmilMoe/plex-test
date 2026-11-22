@@ -44,13 +44,56 @@ class InstallCommand extends Command
             $this->components->info('Oprettede .claude/commands/'.$stub->getFilename());
         }
 
+        $this->registerFilamentPlugin($files);
+
         $this->newLine();
         $this->line('Næste skridt:');
-        $this->line('  1. Forbind Plex: gå til '.url(config('plex-recommender.routes.prefix', 'plex'))
-            .' og tryk "Log ind med Plex", eller kør: php artisan plex:login');
-        $this->line('  2. (Valgfrit) Sæt TMDB_API_KEY i .env for forslag til nye titler');
+        $this->line('  1. Åbn dit Filament-panel, vælg Plex > Indstillinger, og tryk "Log ind med Plex"');
+        $this->line('     (uden Filament: php artisan plex:login)');
+        $this->line('  2. Tilføj evt. en gratis TMDB-nøgle samme sted for forslag til nye titler');
         $this->line('  3. Åbn projektet i Claude Code og kør /anbefal');
 
         return self::SUCCESS;
+    }
+
+    /** Add ->plugin(PlexRecommenderPlugin::make()) to the app's Filament panel provider(s). */
+    protected function registerFilamentPlugin(Filesystem $files): void
+    {
+        if (! class_exists(\Filament\Panel::class)) {
+            return;
+        }
+        $providers = $files->glob(app_path('Providers/Filament/*PanelProvider.php'));
+        if (! $providers) {
+            $this->components->warn('Fandt intet Filament-panel. Opret et med: php artisan filament:install --panels');
+
+            return;
+        }
+
+        foreach ($providers as $path) {
+            $code = $files->get($path);
+            $name = basename($path);
+            if (str_contains($code, 'PlexRecommenderPlugin')) {
+                $this->components->info("Plex-pluginnet er allerede i {$name}");
+
+                continue;
+            }
+            $updated = preg_replace(
+                '/(->id\(\s*[\'"][^\'"]+[\'"]\s*\))/',
+                "$1\n            ->plugin(\\EmilMoe\\PlexRecommender\\Filament\\PlexRecommenderPlugin::make())",
+                $code,
+                1,
+            );
+            if ($updated === null || $updated === $code) {
+                $this->components->warn("Kunne ikke tilføje pluginnet automatisk i {$name}. Tilføj selv: ->plugin(PlexRecommenderPlugin::make())");
+
+                continue;
+            }
+            $files->put($path, $updated);
+            $this->components->info("Plex-pluginnet er tilføjet til {$name}");
+        }
+
+        if ($this->getApplication()->has('filament:assets')) {
+            $this->callSilently('filament:assets');
+        }
     }
 }

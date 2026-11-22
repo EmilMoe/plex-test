@@ -2,7 +2,7 @@
 
 namespace EmilMoe\PlexRecommender\Console;
 
-use EmilMoe\PlexRecommender\Auth\CredentialStore;
+use EmilMoe\PlexRecommender\Settings;
 use EmilMoe\PlexRecommender\Auth\PlexTv;
 use EmilMoe\PlexRecommender\RecommenderService;
 use Illuminate\Console\Command;
@@ -15,12 +15,8 @@ class LoginCommand extends Command
 
     protected $description = 'Log ind med din Plex-konto (ingen token nødvendig)';
 
-    public function handle(PlexTv $plexTv, CredentialStore $store, RecommenderService $svc): int
+    public function handle(PlexTv $plexTv, Settings $store, RecommenderService $svc): int
     {
-        if ($store->usesConfig()) {
-            $this->components->warn('PLEX_URL og PLEX_TOKEN er sat i .env og bruges i stedet for login. Fjern dem først.');
-        }
-
         $pin = $plexTv->createPin();
         $this->newLine();
         $this->line('  Åbn dette link og log ind med din Plex-konto:');

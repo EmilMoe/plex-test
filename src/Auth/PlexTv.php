@@ -2,6 +2,7 @@
 
 namespace EmilMoe\PlexRecommender\Auth;
 
+use EmilMoe\PlexRecommender\Settings;
 use Illuminate\Http\Client\Factory as Http;
 use Illuminate\Http\Client\PendingRequest;
 use Throwable;
@@ -14,7 +15,7 @@ class PlexTv
 {
     public const PRODUCT = 'Plex Recommender';
 
-    public function __construct(protected Http $http, protected CredentialStore $store) {}
+    public function __construct(protected Http $http, protected Settings $store) {}
 
     protected function request(?string $token = null): PendingRequest
     {
@@ -136,6 +137,7 @@ class PlexTv
             'server_name' => $server['name'],
             'server_id' => $server['id'],
             'account_token' => $accountToken,
+            'account_name' => rescue(fn () => $this->user($accountToken)['username'], null, false),
             'connected_at' => now()->toIso8601String(),
         ]);
 

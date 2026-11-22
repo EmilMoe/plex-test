@@ -8,14 +8,27 @@ use Orchestra\Testbench\TestCase as Orchestra;
 
 abstract class TestCase extends Orchestra
 {
+
     protected function getPackageProviders($app): array
     {
-        $providers = [PlexRecommenderServiceProvider::class];
-        if (class_exists(\Laravel\Mcp\Server\McpServiceProvider::class)) {
-            array_unshift($providers, \Laravel\Mcp\Server\McpServiceProvider::class);
-        }
-
-        return $providers;
+        return [
+            \Laravel\Mcp\Server\McpServiceProvider::class,
+            \Livewire\LivewireServiceProvider::class,
+            \BladeUI\Icons\BladeIconsServiceProvider::class,
+            \BladeUI\Heroicons\BladeHeroiconsServiceProvider::class,
+            \RyanChandler\BladeCaptureDirective\BladeCaptureDirectiveServiceProvider::class,
+            \Filament\Support\SupportServiceProvider::class,
+            \Filament\Actions\ActionsServiceProvider::class,
+            \Filament\Forms\FormsServiceProvider::class,
+            \Filament\Infolists\InfolistsServiceProvider::class,
+            \Filament\Notifications\NotificationsServiceProvider::class,
+            \Filament\Schemas\SchemasServiceProvider::class,
+            \Filament\Tables\TablesServiceProvider::class,
+            \Filament\Widgets\WidgetsServiceProvider::class,
+            \Filament\FilamentServiceProvider::class,
+            PlexRecommenderServiceProvider::class,
+            TestPanelProvider::class,
+        ];
     }
 
     protected function defineEnvironment($app): void
@@ -23,15 +36,19 @@ abstract class TestCase extends Orchestra
         $app['config']->set('plex-recommender.plex.url', 'http://plex.test:32400');
         $app['config']->set('plex-recommender.plex.token', 'tok');
         $app['config']->set('plex-recommender.tmdb.api_key', 'key');
-        $app['config']->set('cache.default', 'array');
+        $app['config']->set('cache.default', 'file');
+        $app['config']->set('cache.stores.file.path', sys_get_temp_dir().'/plex-recommender-cache-'.getmypid());
+        $app['config']->set('cache.serializable_classes', false);
         $app['config']->set('app.key', 'base64:'.base64_encode(str_repeat('k', 32)));
         $app['config']->set('plex-recommender.credentials_path', sys_get_temp_dir().'/plex-recommender-test-'.getmypid().'.json');
         $app['config']->set('plex-recommender.routes.middleware', ['web']);
+        $app['config']->set('plex-recommender.routes.enabled', true);
     }
 
     protected function tearDown(): void
     {
         @unlink(sys_get_temp_dir().'/plex-recommender-test-'.getmypid().'.json');
+        (new \Illuminate\Filesystem\Filesystem)->deleteDirectory(sys_get_temp_dir().'/plex-recommender-cache-'.getmypid());
         parent::tearDown();
     }
 

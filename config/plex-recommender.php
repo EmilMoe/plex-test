@@ -7,7 +7,8 @@ return [
     | eller kør `php artisan plex:login`. Så findes server og token automatisk
     | og gemmes krypteret i `credentials_path`.
     |
-    | Alternativt kan du sætte PLEX_URL + PLEX_TOKEN manuelt; de vinder over login.
+    | Alle værdier her er kun standardværdier: det der gemmes i Filament-
+    | indstillingerne (eller via login) vinder over .env.
     */
     'plex' => [
         'url' => env('PLEX_URL'),
@@ -25,6 +26,7 @@ return [
     'tmdb' => [
         'api_key' => env('TMDB_API_KEY'),
         'language' => env('PLEX_RECOMMENDER_LANGUAGE', 'da-DK'),
+        'base_url' => env('TMDB_BASE_URL', 'https://api.themoviedb.org/3'),
     ],
 
     // Hvor login-forbindelsen gemmes (krypteret med APP_KEY).
@@ -32,7 +34,8 @@ return [
 
     // Siden med "Log ind med Plex"-knappen.
     'routes' => [
-        'enabled' => env('PLEX_RECOMMENDER_ROUTES', true),
+        // Standalone-side uden Filament. Filament-pluginnet har sin egen side.
+        'enabled' => env('PLEX_RECOMMENDER_ROUTES', false),
         'prefix' => 'plex',
         // Standard kræver at man er logget ind i din app. Har appen ingen login,
         // så sæt PLEX_RECOMMENDER_MIDDLEWARE=web
@@ -45,6 +48,11 @@ return [
     // Navnet MCP-serveren registreres under: php artisan mcp:start plex
     // Sæt til null hvis du selv vil registrere den i routes/ai.php.
     'mcp_handle' => 'plex',
+
+    'recommendations' => [
+        // Minimum antal TMDB-stemmer før en titel foreslås.
+        'min_votes' => 50,
+    ],
 
     'profile' => [
         // Halveringstid i dage: hvor hurtigt gamle visninger mister betydning.

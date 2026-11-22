@@ -2,7 +2,7 @@
 
 namespace EmilMoe\PlexRecommender\Tests\Feature;
 
-use EmilMoe\PlexRecommender\Auth\CredentialStore;
+use EmilMoe\PlexRecommender\Settings;
 use EmilMoe\PlexRecommender\Clients\PlexClient;
 use EmilMoe\PlexRecommender\RecommenderService;
 use EmilMoe\PlexRecommender\Tests\Fixtures;
@@ -78,7 +78,7 @@ class PlexLoginTest extends TestCase
             ->assertRedirect('/plex')
             ->assertSessionHas('status', 'Forbundet til Stuen.');
 
-        $store = app(CredentialStore::class);
+        $store = app(Settings::class);
         $this->assertSame('https://192-168-1-10.abc.plex.direct:32400', $store->url());
         $this->assertSame('server-token', $store->token());
 
@@ -96,7 +96,7 @@ class PlexLoginTest extends TestCase
         $this->get('/plex')->assertSee('Stuen')->assertSee('Vens server')->assertDontSee('iPhone');
 
         $this->post('/plex/select', ['server' => 'srv2'])->assertSessionHas('status', 'Forbundet til Vens server.');
-        $this->assertSame('friend-token', app(CredentialStore::class)->token());
+        $this->assertSame('friend-token', app(Settings::class)->token());
     }
 
     public function test_callback_waits_while_pin_not_claimed(): void
@@ -113,21 +113,24 @@ class PlexLoginTest extends TestCase
         $raw = file_get_contents(config('plex-recommender.credentials_path'));
         $this->assertStringNotContainsString('server-token', $raw);
 
-        $clientId = app(CredentialStore::class)->clientId();
+        $clientId = app(Settings::class)->clientId();
         $this->post('/plex/disconnect')->assertRedirect('/plex');
-        $this->app->forgetInstance(CredentialStore::class);
+        $this->app->forgetInstance(Settings::class);
         $this->app->forgetInstance(PlexClient::class);
-        $store = app(CredentialStore::class);
+        $store = app(Settings::class);
         $this->assertFalse($store->connected());
         $this->assertSame($clientId, $store->clientId());
     }
 
-    public function test_env_token_wins_over_login(): void
+    public function test_login_wins_over_env_and_env_is_fallback(): void
     {
         config(['plex-recommender.plex.url' => 'http://plex.test:32400', 'plex-recommender.plex.token' => 'tok']);
-        $this->app->forgetInstance(CredentialStore::class);
-        $this->assertTrue(app(CredentialStore::class)->usesConfig());
-        $this->assertSame('tok', app(CredentialStore::class)->token());
+        $this->app->forgetInstance(Settings::class);
+        $this->assertSame('tok', app(Settings::class)->token());
+        $this->assertFalse(app(Settings::class)->isStored('server_token'));
+
+        app(Settings::class)->put(['server_url' => 'https://x.plex.direct:32400', 'server_token' => 'ui-token']);
+        $this->assertSame('ui-token', app(Settings::class)->token());
     }
 
     public function test_artisan_login(): void
@@ -137,6 +140,6 @@ class PlexLoginTest extends TestCase
             ->expectsOutputToContain('app.plex.tv/auth')
             ->expectsOutputToContain('Forbundet til Stuen')
             ->assertSuccessful();
-        $this->assertSame('server-token', app(CredentialStore::class)->token());
+        $this->assertSame('server-token', app(Settings::class)->token());
     }
 }

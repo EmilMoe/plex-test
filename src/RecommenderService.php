@@ -6,6 +6,7 @@ use EmilMoe\PlexRecommender\Clients\PlexClient;
 use EmilMoe\PlexRecommender\Clients\TmdbClient;
 use EmilMoe\PlexRecommender\Data\MediaItem;
 use Illuminate\Contracts\Cache\Repository as Cache;
+use Illuminate\Http\Client\Factory as Http;
 use InvalidArgumentException;
 
 /**
@@ -14,14 +15,36 @@ use InvalidArgumentException;
  */
 class RecommenderService
 {
+    protected ?TmdbClient $tmdbClient = null;
+
+    protected ?string $tmdbClientKey = null;
+
     public function __construct(
         protected PlexClient $plex,
-        protected ?TmdbClient $tmdb,
+        protected Settings $settings,
         protected Cache $cache,
-        protected int $cacheTtl = 600,
-        protected ?string $accountId = null,
-        protected int $halfLifeDays = 365,
+        protected Http $http,
     ) {}
+
+    public function plex(): PlexClient
+    {
+        return $this->plex;
+    }
+
+    /** TMDB client for the current settings, or null when no API key is configured. */
+    public function tmdb(): ?TmdbClient
+    {
+        if (! $key = $this->settings->tmdbApiKey()) {
+            return null;
+        }
+        $id = $key.'|'.$this->settings->language();
+        if ($this->tmdbClientKey !== $id) {
+            $this->tmdbClient = new TmdbClient($this->http, $key, $this->settings->language(), (string) config('plex-recommender.tmdb.base_url', 'https://api.themoviedb.org/3'));
+            $this->tmdbClientKey = $id;
+        }
+
+        return $this->tmdbClient;
+    }
 
     public static function normalizeType(string $type): string
     {
@@ -36,7 +59,7 @@ class RecommenderService
 
     public function hasTmdb(): bool
     {
-        return $this->tmdb !== null;
+        return $this->tmdb() !== null;
     }
 
     // ------------------------------------------------------------------ data
@@ -46,11 +69,14 @@ class RecommenderService
     {
         $type = self::normalizeType($type);
 
-        return $this->cache->remember(
-            "plex-recommender:items:{$type}",
-            $this->cacheTtl,
-            fn () => $this->plex->libraryItems($type),
+        // Cached as plain arrays: Laravel 13 refuses to unserialize objects by default.
+        $rows = $this->cache->remember(
+            "plex-recommender:items:{$type}:v2",
+            $this->settings->cacheTtl(),
+            fn () => array_map(fn (MediaItem $i) => $i->toArray(), $this->plex->libraryItems($type)),
         );
+
+        return array_map(fn (array $row) => MediaItem::fromArray($row), $rows);
     }
 
     /** @return list<MediaItem> */
@@ -61,13 +87,13 @@ class RecommenderService
 
     public function refresh(): void
     {
-        $this->cache->forget('plex-recommender:items:'.MediaItem::MOVIE);
-        $this->cache->forget('plex-recommender:items:'.MediaItem::SHOW);
+        $this->cache->forget('plex-recommender:items:'.MediaItem::MOVIE.':v2');
+        $this->cache->forget('plex-recommender:items:'.MediaItem::SHOW.':v2');
     }
 
     public function profile(?string $type = null): TasteProfile
     {
-        return TasteProfile::build($type ? $this->items($type) : $this->allItems(), null, $this->halfLifeDays);
+        return TasteProfile::build($type ? $this->items($type) : $this->allItems(), null, $this->settings->halfLifeDays());
     }
 
     // ------------------------------------------------------------ operations
@@ -99,7 +125,7 @@ class RecommenderService
             );
         }
 
-        $history = $this->plex->history(5000, time() - $days * 86400, $this->accountId);
+        $history = $this->plex->history(5000, time() - $days * 86400, $this->settings->accountId());
         $plays = $last = [];
         foreach ($history as $h) {
             $key = match (true) {
@@ -150,7 +176,7 @@ class RecommenderService
                 'type' => $h['type'] ?? null,
                 'viewed_at' => date('Y-m-d H:i', (int) ($h['viewedAt'] ?? 0)),
             ];
-        }, $this->plex->history($limit, null, $this->accountId));
+        }, $this->plex->history($limit, null, $this->settings->accountId()));
     }
 
     /** Titles you own but haven't watched, ranked by fit with your taste profile. */
@@ -169,7 +195,7 @@ class RecommenderService
                 continue;
             }
             [$score, $why] = $profile->score($item);
-            $candidates[] = [...$item->brief(), 'score' => $score, 'why' => $why, 'summary' => mb_substr($item->summary, 0, 300)];
+            $candidates[] = [...$item->brief(), 'score' => $score, 'why' => $why, 'summary' => mb_substr($item->summary, 0, 300), 'thumb' => $item->thumb];
         }
         usort($candidates, fn ($a, $b) => $b['score'] <=> $a['score']);
 
@@ -177,10 +203,12 @@ class RecommenderService
     }
 
     /** Titles NOT in your library, via TMDB recommendations for your most-watched titles. */
-    public function recommendNew(string $type, int $limit = 20, int $seeds = 15, int $minVotes = 50): array
+    public function recommendNew(string $type, int $limit = 20, int $seeds = 15, ?int $minVotes = null): array
     {
         $type = self::normalizeType($type);
-        if (! $this->tmdb) {
+        $tmdb = $this->tmdb();
+        $minVotes ??= $this->settings->minVotes();
+        if (! $tmdb) {
             return ['error' => 'TMDB_API_KEY er ikke sat. Brug taste_profile + check_owned i stedet, '
                 .'eller tilføj en gratis nøgle fra themoviedb.org.'];
         }
@@ -194,16 +222,16 @@ class RecommenderService
 
         $profile = $this->profile();
         $seedItems = array_slice(array_values(array_filter($profile->topTitles, fn ($t) => $t[0]->type === $type)), 0, $seeds);
-        $genreMap = $this->tmdb->genreNames($type);
+        $genreMap = $tmdb->genreNames($type);
 
         $scores = $because = $info = $usedSeeds = [];
         foreach ($seedItems as [$item, $weight]) {
-            $tmdbId = $item->tmdbId ?? $this->tmdb->findTmdbId($type, $item->imdbId, $item->tvdbId);
+            $tmdbId = $item->tmdbId ?? $tmdb->findTmdbId($type, $item->imdbId, $item->tvdbId);
             if (! $tmdbId) {
                 continue;
             }
             $usedSeeds[] = $item->label();
-            foreach ($this->tmdb->recommendations($type, $tmdbId) as $pos => $rec) {
+            foreach ($tmdb->recommendations($type, $tmdbId) as $pos => $rec) {
                 $id = $rec['id'];
                 $scores[$id] = ($scores[$id] ?? 0) + $weight * (1.0 - $pos / 25);
                 $because[$id][] = $item->title;
@@ -235,7 +263,7 @@ class RecommenderService
 
             $results[] = [
                 'title' => $title,
-                'original_title' => $orig !== $title ? $orig : null,
+                'original_title' => $orig && $orig !== $title ? $orig : null,
                 'year' => $year,
                 'genres' => array_values(array_filter(array_map(fn ($g) => $genreMap[$g][0] ?? null, $genreIds))),
                 'tmdb_rating' => $rec['vote_average'] ?? null,
@@ -244,6 +272,7 @@ class RecommenderService
                 'score' => round($score, 3),
                 'overview' => mb_substr($rec['overview'] ?? '', 0, 300),
                 'url' => 'https://www.themoviedb.org/'.TmdbClient::kind($type)."/{$id}",
+                'poster' => ! empty($rec['poster_path']) ? 'https://image.tmdb.org/t/p/w342'.$rec['poster_path'] : null,
             ];
         }
         usort($results, fn ($a, $b) => $b['score'] <=> $a['score']);

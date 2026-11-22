@@ -2,7 +2,7 @@
 
 namespace EmilMoe\PlexRecommender\Console;
 
-use EmilMoe\PlexRecommender\Auth\CredentialStore;
+use EmilMoe\PlexRecommender\Settings;
 use EmilMoe\PlexRecommender\RecommenderService;
 use Illuminate\Console\Command;
 
@@ -12,7 +12,7 @@ class LogoutCommand extends Command
 
     protected $description = 'Fjern den gemte Plex-forbindelse';
 
-    public function handle(CredentialStore $store, RecommenderService $svc): int
+    public function handle(Settings $store, RecommenderService $svc): int
     {
         $store->disconnect();
         $svc->refresh();

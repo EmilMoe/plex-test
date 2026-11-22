@@ -29,7 +29,7 @@ class RecommendNew extends PlexTool
             $request->get('type', 'movie'),
             (int) $request->get('limit', 20),
             (int) $request->get('seeds', 15),
-            (int) $request->get('min_votes', 50),
+            $request->get('min_votes') !== null ? (int) $request->get('min_votes') : null,
         );
     }
 }

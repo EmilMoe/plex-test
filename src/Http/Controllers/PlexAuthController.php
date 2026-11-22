@@ -2,7 +2,7 @@
 
 namespace EmilMoe\PlexRecommender\Http\Controllers;
 
-use EmilMoe\PlexRecommender\Auth\CredentialStore;
+use EmilMoe\PlexRecommender\Settings;
 use EmilMoe\PlexRecommender\Auth\PlexTv;
 use EmilMoe\PlexRecommender\RecommenderService;
 use Illuminate\Http\RedirectResponse;
@@ -13,7 +13,7 @@ use Throwable;
 
 class PlexAuthController extends Controller
 {
-    public function __construct(protected PlexTv $plexTv, protected CredentialStore $store) {}
+    public function __construct(protected PlexTv $plexTv, protected Settings $store) {}
 
     /** Status page with the "Log ind med Plex" button, or a server picker. */
     public function show(Request $request): View

@@ -2,10 +2,8 @@
 
 namespace EmilMoe\PlexRecommender;
 
-use EmilMoe\PlexRecommender\Auth\CredentialStore;
 use EmilMoe\PlexRecommender\Auth\PlexTv;
 use EmilMoe\PlexRecommender\Clients\PlexClient;
-use EmilMoe\PlexRecommender\Clients\TmdbClient;
 use EmilMoe\PlexRecommender\Mcp\PlexServer;
 use Illuminate\Http\Client\Factory as Http;
 use Illuminate\Support\ServiceProvider;
@@ -17,38 +15,26 @@ class PlexRecommenderServiceProvider extends ServiceProvider
     {
         $this->mergeConfigFrom(__DIR__.'/../config/plex-recommender.php', 'plex-recommender');
 
-        $this->app->singleton(CredentialStore::class, fn ($app) => new CredentialStore(
+        $this->app->singleton(Settings::class, fn ($app) => new Settings(
             $app->make('files'),
             $app->make('encrypter'),
             config('plex-recommender.credentials_path') ?: storage_path('app/plex-recommender.json'),
-            config('plex-recommender.plex.url') ?: null,
-            config('plex-recommender.plex.token') ?: null,
+            config('plex-recommender', []),
         ));
 
-        $this->app->singleton(PlexTv::class, fn ($app) => new PlexTv($app->make(Http::class), $app->make(CredentialStore::class)));
+        $this->app->singleton(PlexTv::class, fn ($app) => new PlexTv($app->make(Http::class), $app->make(Settings::class)));
 
         $this->app->singleton(PlexClient::class, fn ($app) => new PlexClient(
             $app->make(Http::class),
-            $app->make(CredentialStore::class),
-            filter_var(config('plex-recommender.plex.verify_ssl', true), FILTER_VALIDATE_BOOL),
+            $app->make(Settings::class),
             (int) config('plex-recommender.plex.timeout', 30),
         ));
 
-        $this->app->singleton(TmdbClient::class, fn ($app) => config('plex-recommender.tmdb.api_key')
-            ? new TmdbClient(
-                $app->make(Http::class),
-                config('plex-recommender.tmdb.api_key'),
-                config('plex-recommender.tmdb.language', 'da-DK'),
-            )
-            : null);
-
         $this->app->singleton(RecommenderService::class, fn ($app) => new RecommenderService(
             $app->make(PlexClient::class),
-            config('plex-recommender.tmdb.api_key') ? $app->make(TmdbClient::class) : null,
+            $app->make(Settings::class),
             $app->make('cache')->store(),
-            (int) config('plex-recommender.cache_ttl', 600),
-            config('plex-recommender.plex.account_id') ?: null,
-            (int) config('plex-recommender.profile.recency_half_life_days', 365),
+            $app->make(Http::class),
         ));
     }
 
@@ -56,8 +42,19 @@ class PlexRecommenderServiceProvider extends ServiceProvider
     {
         $this->loadViewsFrom(__DIR__.'/../resources/views', 'plex-recommender');
 
-        if (config('plex-recommender.routes.enabled', true)) {
+        if (config('plex-recommender.routes.enabled', false)) {
             $this->loadRoutesFrom(__DIR__.'/../routes/web.php');
+        }
+
+        // Signed poster proxy used by the Filament pages.
+        \Illuminate\Support\Facades\Route::get('plex-recommender/poster', \EmilMoe\PlexRecommender\Http\Controllers\PosterController::class)
+            ->middleware('signed')
+            ->name('plex-recommender.poster');
+
+        if (class_exists(\Filament\Support\Facades\FilamentAsset::class)) {
+            \Filament\Support\Facades\FilamentAsset::register([
+                \Filament\Support\Assets\Css::make('plex-recommender', __DIR__.'/../resources/dist/plex-recommender.css'),
+            ], 'emilmoe/plex-recommender');
         }
 
         if ($this->app->runningInConsole()) {

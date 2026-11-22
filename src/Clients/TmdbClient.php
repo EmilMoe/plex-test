@@ -14,6 +14,7 @@ class TmdbClient
         protected Http $http,
         protected string $apiKey,
         protected string $language = 'da-DK',
+        protected string $baseUrl = 'https://api.themoviedb.org/3',
     ) {}
 
     public static function kind(string $type): string
@@ -23,7 +24,7 @@ class TmdbClient
 
     protected function get(string $path, array $query = []): array
     {
-        $request = $this->http->baseUrl('https://api.themoviedb.org/3')->acceptJson()->timeout(20);
+        $request = $this->http->baseUrl($this->baseUrl)->acceptJson()->timeout(20);
         // v4 "API Read Access Token" is a JWT; v3 key is a short hex string.
         if (str_starts_with($this->apiKey, 'eyJ')) {
             $request = $request->withToken($this->apiKey);

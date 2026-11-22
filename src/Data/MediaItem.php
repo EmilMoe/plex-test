@@ -32,6 +32,7 @@ final class MediaItem
         public ?float $audienceRating = null,
         public ?float $userRating = null,
         public string $summary = '',
+        public ?string $thumb = null,
     ) {}
 
     /** Build from a Plex "Metadata" JSON object. */
@@ -61,6 +62,7 @@ final class MediaItem
             audienceRating: $float($meta['audienceRating'] ?? null),
             userRating: $float($meta['userRating'] ?? null),
             summary: (string) ($meta['summary'] ?? ''),
+            thumb: isset($meta['thumb']) ? (string) $meta['thumb'] : null,
         );
 
         $guids = array_map(fn ($g) => $g['id'] ?? '', $meta['Guid'] ?? []);
@@ -80,6 +82,17 @@ final class MediaItem
         }
 
         return $item;
+    }
+
+    /** Plain array form, safe for caches that don't allow object unserialization. */
+    public function toArray(): array
+    {
+        return get_object_vars($this);
+    }
+
+    public static function fromArray(array $data): self
+    {
+        return new self(...$data);
     }
 
     public function watched(): bool
@@ -114,6 +127,7 @@ final class MediaItem
     public function brief(): array
     {
         $d = [
+            'rating_key' => $this->ratingKey,
             'title' => $this->title,
             'year' => $this->year,
             'type' => $this->type,

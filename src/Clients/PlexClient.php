@@ -2,8 +2,8 @@
 
 namespace EmilMoe\PlexRecommender\Clients;
 
-use EmilMoe\PlexRecommender\Auth\CredentialStore;
 use EmilMoe\PlexRecommender\Data\MediaItem;
+use EmilMoe\PlexRecommender\Settings;
 use Generator;
 use Illuminate\Http\Client\Factory as Http;
 use Illuminate\Http\Client\PendingRequest;
@@ -15,26 +15,25 @@ class PlexClient
 
     public function __construct(
         protected Http $http,
-        protected CredentialStore $credentials,
-        protected bool $verifySsl = true,
+        protected Settings $settings,
         protected int $timeout = 30,
     ) {}
 
     protected function request(): PendingRequest
     {
-        if (! $this->credentials->connected()) {
+        if (! $this->settings->connected()) {
             throw new RuntimeException(
-                'Ikke forbundet til Plex. Gå til /plex og tryk "Log ind med Plex", eller kør: php artisan plex:login'
+                'Ikke forbundet til Plex. Åbn Plex-indstillingerne og tryk "Log ind med Plex", eller kør: php artisan plex:login'
             );
         }
 
         return $this->http
-            ->baseUrl(rtrim($this->credentials->url(), '/'))
+            ->baseUrl(rtrim($this->settings->url(), '/'))
             ->acceptJson()
             ->timeout($this->timeout)
-            ->withOptions(['verify' => $this->verifySsl])
+            ->withOptions(['verify' => $this->settings->verifySsl()])
             ->withHeaders([
-                'X-Plex-Token' => $this->credentials->token(),
+                'X-Plex-Token' => $this->settings->token(),
                 'X-Plex-Client-Identifier' => 'laravel-plex-recommender',
                 'X-Plex-Product' => 'laravel-plex-recommender',
             ]);
@@ -73,6 +72,37 @@ class PlexClient
         }
 
         return $items;
+    }
+
+    /** Plex users on the server (for limiting history to one person). */
+    public function accounts(): array
+    {
+        $out = [];
+        foreach ($this->get('/accounts')['Account'] ?? [] as $a) {
+            if ((int) ($a['id'] ?? 0) > 0 && ($a['name'] ?? '') !== '') {
+                $out[(string) $a['id']] = (string) $a['name'];
+            }
+        }
+
+        return $out;
+    }
+
+    /** Raw image bytes + content type for a Plex image path such as /library/metadata/1/thumb/123. */
+    public function image(string $path, int $width = 300, int $height = 450): array
+    {
+        $response = $this->request()->withHeaders(['Accept' => 'image/*'])->get('/photo/:/transcode', [
+            'url' => $path, 'width' => $width, 'height' => $height, 'minSize' => 1, 'upscale' => 1,
+        ])->throw();
+
+        return [$response->body(), $response->header('Content-Type') ?: 'image/jpeg'];
+    }
+
+    /** Check the connection; returns the server's friendly name. */
+    public function identity(): string
+    {
+        $c = $this->get('/');
+
+        return (string) ($c['friendlyName'] ?? 'Plex');
     }
 
     /** Watch history, newest first. $since is a unix timestamp. */
