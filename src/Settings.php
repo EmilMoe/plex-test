@@ -25,6 +25,10 @@ class Settings
         'cache_ttl' => 'cache_ttl',
         'recency_half_life_days' => 'profile.recency_half_life_days',
         'min_votes' => 'recommendations.min_votes',
+        'claude_driver' => 'claude.driver',
+        'claude_binary' => 'claude.binary',
+        'claude_model' => 'claude.model',
+        'anthropic_api_key' => 'claude.api_key',
     ];
 
     protected ?array $data = null;
@@ -145,5 +149,28 @@ class Settings
     public function minVotes(): int
     {
         return (int) $this->get('min_votes', 50);
+    }
+
+    /** "code" (local Claude Code CLI), "api" (Claude API key) or "off". */
+    public function claudeDriver(): string
+    {
+        $driver = (string) $this->get('claude_driver', 'code');
+
+        return in_array($driver, ['code', 'api', 'off'], true) ? $driver : 'code';
+    }
+
+    public function claudeBinary(): string
+    {
+        return (string) $this->get('claude_binary', 'claude');
+    }
+
+    public function claudeModel(): ?string
+    {
+        return $this->get('claude_model');
+    }
+
+    public function anthropicApiKey(): ?string
+    {
+        return $this->get('anthropic_api_key');
     }
 }

@@ -11,10 +11,12 @@ use Illuminate\Console\Command;
 class PlexCommand extends Command
 {
     protected $signature = 'plex
-        {action : overview | profile | most-watched | history | unwatched | recommend | check | refresh}
+        {action : overview | profile | most-watched | history | unwatched | recommend | claude | check | refresh}
         {args?* : type (movie/show) – eller titler til "check"}
         {--genre= : Filtrér på genre (unwatched)}
         {--days= : Kun de sidste N dage (most-watched)}
+        {--wish= : Dit ønske til Claude, f.eks. "noget let" (claude)}
+        {--fresh : Spørg Claude igen i stedet for at bruge sidste svar (claude)}
         {--limit=20 : Antal resultater}
         {--json : Output som JSON}';
 
@@ -33,6 +35,7 @@ class PlexCommand extends Command
             'history' => $svc->recentHistory($limit),
             'unwatched' => $svc->unwatchedInLibrary($type, $limit, $this->option('genre')),
             'recommend' => $svc->recommendNew($type, $limit),
+            'claude' => app(\EmilMoe\PlexRecommender\Claude\ClaudeAdvisor::class)->recommend($type, $this->option('wish'), min($limit, 20), (bool) $this->option('fresh')),
             'check' => $svc->checkOwned($args),
             'refresh' => tap(['ok' => 'Cache ryddet.'], fn () => $svc->refresh()),
             default => null,
@@ -62,14 +65,26 @@ class PlexCommand extends Command
 
             return;
         }
+        if (isset($result['driver'])) {
+            foreach ($result['recommendations'] as $r) {
+                $this->newLine();
+                $this->line('<info>'.$r['title'].($r['year'] ? " ({$r['year']})" : '').'</info>'.($r['in_library'] ? ' <comment>[i dit bibliotek]</comment>' : ''));
+                $this->line('  '.$r['reason']);
+                if ($r['because_you_watched']) {
+                    $this->line('  <fg=gray>Fordi du så '.implode(', ', $r['because_you_watched']).'</>');
+                }
+            }
+
+            return;
+        }
         if (isset($result['recommendations'])) {
-            $this->info('Baseret på: '.implode(', ', $result['seeds_used']));
+            $this->info('Baseret på: '.implode(', ', $result['seeds_used'] ?? []));
             $result = $result['recommendations'];
         }
         if (array_is_list($result) && $result && is_array($result[0])) {
             $rows = array_map(fn ($r) => array_map(
                 fn ($v) => is_array($v) ? implode(', ', array_map(fn ($x) => is_array($x) ? json_encode($x) : $x, $v)) : $v,
-                array_diff_key($r, array_flip(['summary', 'overview', 'url'])),
+                array_diff_key($r, array_flip(['summary', 'overview', 'url', 'breakdown'])),
             ), $result);
             $headers = array_keys(array_merge(...$rows));
             $rows = array_map(fn ($r) => array_map(fn ($h) => $r[$h] ?? '', $headers), $rows);

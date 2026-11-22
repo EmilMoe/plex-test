@@ -7,6 +7,7 @@ Laravel package `emilmoe/plex-recommender` (namespace `EmilMoe\PlexRecommender`)
 - `src/Clients/TmdbClient.php` TMDB (recommendations, external id lookup, genres)
 - `src/RecommenderService.php` all operations; used by MCP tools, `php artisan plex`, and the facade
 - `src/Mcp/` laravel/mcp server (`PlexServer`) + one class per tool in `Tools/`
+- `src/Claude/` "Spørg Claude": `ClaudeAdvisor` builds the prompt and checks answers against the library; drivers `ClaudeCodeDriver` (local `claude -p`, no API key) and `AnthropicApiDriver` (optional `anthropic-ai/sdk`). Tests fake `Process`
 - `src/Settings.php` all runtime settings: values saved from UI (encrypted JSON) win, config/.env are defaults
 - `src/Auth/PlexTv.php` plex.tv PIN login + server discovery; CLI `plex:login`
 - `src/Filament/` plugin (`PlexRecommenderPlugin`) with pages Recommendations, TasteProfile, PlexSettings (popup login + wire:poll); views in `resources/views/filament`, hand-written CSS in `resources/dist` (no build step, uses Filament CSS vars). Posters via signed route `PosterController`.

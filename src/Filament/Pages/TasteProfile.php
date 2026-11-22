@@ -60,6 +60,10 @@ class TasteProfile extends Page
             $svc = app(RecommenderService::class);
             $profile = $svc->tasteProfile($this->type, 8);
             $types = $this->type ? [$this->type] : ['movie', 'show'];
+            // Movies and shows are listed separately so long shows don't crowd out movies.
+            foreach ($types as $t) {
+                $profile['most_watched'][$t] = $svc->mostWatched($t, 8);
+            }
             $recent = [];
             foreach ($types as $t) {
                 array_push($recent, ...$svc->mostWatched($t, 8, 90));

@@ -2,6 +2,7 @@
 
 namespace EmilMoe\PlexRecommender\Filament\Pages;
 
+use EmilMoe\PlexRecommender\Claude\ClaudeAdvisor;
 use EmilMoe\PlexRecommender\Data\MediaItem;
 use EmilMoe\PlexRecommender\Filament\Pages\Concerns\UsesPluginNavigation;
 use EmilMoe\PlexRecommender\RecommenderService;
@@ -41,6 +42,38 @@ class Recommendations extends Page
     public bool $ready = false;
 
     public ?string $error = null;
+
+    /** Free-text wish for Claude, e.g. "noget let og sjovt". */
+    #[UrlAttribute(as: 'onske')]
+    public string $wish = '';
+
+    public ?string $claudeError = null;
+
+    /** Ask Claude (slow: runs Claude Code or calls the API). Result is cached. */
+    public function askClaude(bool $fresh = false): void
+    {
+        @set_time_limit(300);
+        $this->claudeError = null;
+        $result = app(ClaudeAdvisor::class)->recommend($this->type, $this->wish, 12, $fresh);
+        if (isset($result['error'])) {
+            $this->claudeError = $result['error'];
+        }
+    }
+
+    public function claudeEnabled(): bool
+    {
+        return app(ClaudeAdvisor::class)->enabled();
+    }
+
+    /** Cached Claude answer for the current type + wish, or null if not asked yet. */
+    public function claudeResult(): ?array
+    {
+        if (! $this->ready || ! $this->isConnected()) {
+            return null;
+        }
+
+        return app(ClaudeAdvisor::class)->cached($this->type, $this->wish);
+    }
 
     public function getSubheading(): ?string
     {
@@ -98,6 +131,25 @@ class Recommendations extends Page
         $svc = app(RecommenderService::class);
 
         try {
+            if ($this->source === 'claude') {
+                return array_map(fn ($r) => [
+                    'title' => $r['title'],
+                    'year' => $r['year'],
+                    'poster' => ($thumb = $this->thumbFor($r['rating_key'])) ? URL::temporarySignedRoute('plex-recommender.poster', now()->addDay(), ['path' => $thumb]) : null,
+                    'badge' => $r['in_library'] ? 'I dit bibliotek' : null,
+                    'badge_title' => 'Ligger allerede på din Plex',
+                    'genres' => $r['genres'],
+                    'reasons' => array_values(array_filter([
+                        $r['reason'],
+                        $r['because_you_watched'] ? 'Fordi du så '.$this->list($r['because_you_watched']) : null,
+                    ])),
+                    'summary' => $r['original_title'] ? 'Originaltitel: '.$r['original_title'] : null,
+                    'url' => $r['in_library'] ? null : 'https://www.themoviedb.org/search?query='.rawurlencode($r['title']),
+                    'score' => null,
+                    'why' => [],
+                ], $this->claudeResult()['recommendations'] ?? []);
+            }
+
             if ($this->source === 'new') {
                 $result = $svc->recommendNew($this->type, 24);
                 if (isset($result['error'])) {
@@ -163,6 +215,20 @@ class Recommendations extends Page
         } catch (Throwable) {
             return [];
         }
+    }
+
+    protected function thumbFor(?string $ratingKey): ?string
+    {
+        if (! $ratingKey) {
+            return null;
+        }
+        foreach (app(RecommenderService::class)->items($this->type) as $item) {
+            if ($item->ratingKey === $ratingKey) {
+                return $item->thumb;
+            }
+        }
+
+        return null;
     }
 
     /** Human-readable explanation rows for a TMDB recommendation. */

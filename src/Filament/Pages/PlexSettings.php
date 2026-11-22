@@ -3,6 +3,10 @@
 namespace EmilMoe\PlexRecommender\Filament\Pages;
 
 use EmilMoe\PlexRecommender\Auth\PlexTv;
+use EmilMoe\PlexRecommender\Claude\AnthropicApiDriver;
+use EmilMoe\PlexRecommender\Claude\ClaudeAdvisor;
+use EmilMoe\PlexRecommender\Claude\ClaudeCodeDriver;
+use EmilMoe\PlexRecommender\Claude\ClaudeException;
 use EmilMoe\PlexRecommender\Filament\Pages\Concerns\UsesPluginNavigation;
 use EmilMoe\PlexRecommender\Filament\PlexRecommenderPlugin;
 use EmilMoe\PlexRecommender\RecommenderService;
@@ -77,6 +81,10 @@ class PlexSettings extends Page
             'verify_ssl' => $s->verifySsl(),
             'cache_minutes' => (int) round($s->cacheTtl() / 60),
             'recency_half_life_days' => $s->halfLifeDays(),
+            'claude_driver' => $s->claudeDriver(),
+            'claude_binary' => $s->claudeBinary(),
+            'claude_model' => $s->claudeModel(),
+            'anthropic_api_key' => $s->anthropicApiKey(),
         ]);
     }
 
@@ -153,6 +161,43 @@ class PlexSettings extends Page
                 ])
                 ->columns(['md' => 2]),
 
+            Section::make('Spørg Claude')
+                ->description('Personlige forslag skrevet af Claude, med begrundelse.')
+                ->icon(Heroicon::OutlinedChatBubbleLeftRight)
+                ->afterHeader([$this->testClaudeAction()])
+                ->schema([
+                    Select::make('claude_driver')
+                        ->label('Hvordan skal Claude bruges?')
+                        ->options([
+                            'code' => 'Claude Code på denne computer (ingen API-nøgle)',
+                            'api' => 'Claude API med API-nøgle',
+                            'off' => 'Slået fra',
+                        ])
+                        ->selectablePlaceholder(false)
+                        ->live()
+                        ->columnSpanFull(),
+                    TextInput::make('claude_binary')
+                        ->label('Sti til Claude Code')
+                        ->placeholder('claude')
+                        ->helperText('Normalt fundet automatisk. Virker det ikke, så kør `which claude` i en terminal og indsæt stien.')
+                        ->visible(fn ($get) => $get('claude_driver') === 'code'),
+                    TextInput::make('anthropic_api_key')
+                        ->label('Anthropic API-nøgle')
+                        ->password()
+                        ->revealable()
+                        ->helperText(new HtmlString(
+                            'Fra <a href="https://console.anthropic.com/settings/keys" target="_blank" style="text-decoration: underline">console.anthropic.com</a>. '
+                            .'Betales efter forbrug, separat fra dit Claude-abonnement. Kræver <code>composer require anthropic-ai/sdk</code>.'
+                        ))
+                        ->visible(fn ($get) => $get('claude_driver') === 'api'),
+                    TextInput::make('claude_model')
+                        ->label('Model (valgfri)')
+                        ->placeholder(fn ($get) => $get('claude_driver') === 'api' ? 'claude-opus-5-5' : 'Claude Codes standard')
+                        ->helperText('Lad stå tom for standard.')
+                        ->visible(fn ($get) => $get('claude_driver') !== 'off'),
+                ])
+                ->columns(['md' => 2]),
+
             Section::make('Avanceret')
                 ->icon(Heroicon::OutlinedAdjustmentsHorizontal)
                 ->collapsible()
@@ -207,6 +252,10 @@ class PlexSettings extends Page
             'verify_ssl' => (bool) $data['verify_ssl'],
             'cache_ttl' => max(0, (int) ($data['cache_minutes'] ?? 10)) * 60,
             'recency_half_life_days' => max(1, (int) ($data['recency_half_life_days'] ?? 180)),
+            'claude_driver' => $data['claude_driver'] ?? 'code',
+            'claude_binary' => trim((string) ($data['claude_binary'] ?? '')) ?: null,
+            'claude_model' => trim((string) ($data['claude_model'] ?? '')) ?: null,
+            'anthropic_api_key' => trim((string) ($data['anthropic_api_key'] ?? '')) ?: null,
         ]);
         app(RecommenderService::class)->refresh();
 
@@ -377,6 +426,37 @@ class PlexSettings extends Page
                     Notification::make()->success()->title('Nøglen virker')->body('Husk at gemme.')->send();
                 } catch (Throwable) {
                     Notification::make()->danger()->title('Nøglen blev afvist af TMDB')->send();
+                }
+            });
+    }
+
+    protected function testClaudeAction(): Action
+    {
+        return Action::make('testClaude')
+            ->label('Test forbindelse')
+            ->icon(Heroicon::OutlinedCheckCircle)
+            ->color('gray')
+            ->size('sm')
+            ->action(function () {
+                @set_time_limit(180);
+                $d = $this->data;
+                $model = trim((string) ($d['claude_model'] ?? '')) ?: null;
+                $driver = match ($d['claude_driver'] ?? 'code') {
+                    'code' => new ClaudeCodeDriver(trim((string) ($d['claude_binary'] ?? '')) ?: 'claude', $model, 120),
+                    'api' => ($key = trim((string) ($d['anthropic_api_key'] ?? ''))) ? new AnthropicApiDriver($key, $model) : null,
+                    default => null,
+                };
+                if (! $driver) {
+                    Notification::make()->warning()->title('Claude er slået fra, eller der mangler en API-nøgle')->send();
+
+                    return;
+                }
+                try {
+                    $advisor = new ClaudeAdvisor(app(RecommenderService::class), $this->settings(), app('cache')->store(), $driver);
+                    $label = $advisor->test();
+                    Notification::make()->success()->title("{$label} virker")->body('Husk at gemme.')->send();
+                } catch (ClaudeException $e) {
+                    Notification::make()->danger()->title('Claude svarede ikke')->body($e->getMessage())->persistent()->send();
                 }
             });
     }

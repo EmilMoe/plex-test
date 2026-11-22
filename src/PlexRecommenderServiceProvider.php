@@ -36,6 +36,12 @@ class PlexRecommenderServiceProvider extends ServiceProvider
             $app->make('cache')->store(),
             $app->make(Http::class),
         ));
+
+        $this->app->singleton(Claude\ClaudeAdvisor::class, fn ($app) => new Claude\ClaudeAdvisor(
+            $app->make(RecommenderService::class),
+            $app->make(Settings::class),
+            $app->make('cache')->store(),
+        ));
     }
 
     public function boot(): void

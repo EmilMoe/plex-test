@@ -54,6 +54,21 @@ return [
         'min_votes' => 50,
     ],
 
+    /*
+    | "Spørg Claude": personlige forslag skrevet af Claude.
+    | driver: "code" bruger Claude Code installeret på samme computer (dit eget
+    | login, ingen API-nøgle). "api" bruger en API-nøgle fra console.anthropic.com
+    | (kræver composer require anthropic-ai/sdk). "off" slår fanen fra.
+    */
+    'claude' => [
+        'driver' => env('PLEX_RECOMMENDER_CLAUDE', 'code'),
+        // Navn eller fuld sti til claude-programmet (find den med `which claude`).
+        'binary' => env('PLEX_RECOMMENDER_CLAUDE_BINARY', 'claude'),
+        // Tom = Claude Codes standardmodel (eller claude-opus-5-5 for API).
+        'model' => env('PLEX_RECOMMENDER_CLAUDE_MODEL'),
+        'api_key' => env('ANTHROPIC_API_KEY'),
+    ],
+
     'profile' => [
         // Halveringstid i dage: hvor hurtigt gamle visninger mister betydning.
         'recency_half_life_days' => 180,

@@ -60,11 +60,15 @@ bl.a. vælge, hvis historik der bruges, hvis I er flere på serveren.
   til dig. Hver titel har en begrundelse, f.eks. *Instruktør: Denis Villeneuve*.
 - **Værd at skaffe**: nye titler, der minder om dine favoritter (*Fordi du så Dark og
   Severance*).
-- Skift mellem film og serier, og filtrér på genre.
+- **Spørg Claude**: Claude læser din smagsprofil og det du har set for nylig og skriver
+  personlige forslag med begrundelse. Skriv evt. hvad du er i humør til. Se
+  [Spørg Claude](#spørg-claude) nedenfor.
+- Skift mellem film og serier, og filtrér på genre. Klik *Hvorfor?* på et kort for at se
+  præcis hvor pointene kommer fra.
 
 ### 3. Min smag
-Dine yndlingsgenrer, instruktører, skuespillere og årtier, hvad du har set mest, og hvad
-du ser lige nu.
+Dine yndlingsgenrer, instruktører, skuespillere og årtier, de film og serier du har set
+mest (hver for sig), og hvad du har set for nylig.
 
 ![Min smag](docs/taste.png)
 
@@ -87,14 +91,35 @@ $panel->plugin(
    genrer, instruktører og skuespillere.
 2. Hver set titel får en vægt. Gensyn tæller, en serie du har set færdig tæller mere end
    en, du droppede efter to afsnit, din stjerne-rating tæller med, og nyere visninger
-   vejer tungere.
+   vejer tungere (halveringstid 180 dage som standard). En serie vejer aldrig mere end en
+   film, du har set tre gange, uanset hvor mange afsnit den har.
 3. Vægtene giver en profil over genrer, instruktører, skuespillere og årtier. Usete titler
    scores mod den profil.
 4. Til nye titler hentes TMDB's anbefalinger for dine mest sete titler. De rangeres efter,
    hvor mange af dine favoritter der peger på dem, genre-match og score. Titler, du
    allerede har, filtreres fra.
 
-## Claude Code
+## Spørg Claude
+
+Fanen *Spørg Claude* på anbefalingssiden sender din smagsprofil, din nylige historik,
+listen over usete titler i dit bibliotek og det du allerede har set til Claude. Svaret
+tjekkes mod dit bibliotek: titler du har set, fjernes, og titler du har, markeres.
+Svaret gemmes i 12 timer. Tryk *Spørg igen* for nye forslag.
+
+Vælg under **Indstillinger → Spørg Claude**:
+
+- **Claude Code på denne computer** (standard): kører `claude -p` med dit eget Claude-login.
+  Ingen API-nøgle, men appen skal køre på samme computer som Claude Code, og forbruget
+  tæller med i dit abonnement. Webserveren skal kunne finde `claude`. Finder den ikke
+  programmet, så indsæt stien fra `which claude`. Claude Code skal være logget ind som
+  den bruger, webserveren kører som. Tryk *Test forbindelse* for at tjekke.
+- **Claude API**: til når appen kører på en server. Kræver en API-nøgle fra
+  console.anthropic.com (betales efter forbrug) og `composer require anthropic-ai/sdk`.
+- **Slået fra**.
+
+Fra terminalen: `php artisan plex claude show --wish="noget let og dansk"`.
+
+## Claude Code (MCP)
 
 Efter `plex:install` kender Claude Code MCP-serveren `plex` (`php artisan mcp:start plex`).
 Godkend den første gang (eller tjek med `/mcp`).
@@ -121,6 +146,7 @@ php artisan plex profile [movie|show]
 php artisan plex most-watched show --days=90
 php artisan plex unwatched movie --genre=Thriller
 php artisan plex recommend show
+php artisan plex claude movie --wish="noget let" [--fresh]
 php artisan plex check "Dark (2017)" "The Bear"
 ```
 Tilføj `--json` for rå JSON.
@@ -149,6 +175,10 @@ noget i panelet:
 | `PLEX_ACCOUNT_ID` | Avanceret → Hvis historik |
 | `PLEX_VERIFY_SSL` | Avanceret → Kontrollér certifikat |
 | `PLEX_RECOMMENDER_CACHE_TTL` | Avanceret → Opdater biblioteket hvert … |
+| `PLEX_RECOMMENDER_CLAUDE` (`code`/`api`/`off`) | Spørg Claude → Hvordan |
+| `PLEX_RECOMMENDER_CLAUDE_BINARY` | Spørg Claude → Sti til Claude Code |
+| `PLEX_RECOMMENDER_CLAUDE_MODEL` | Spørg Claude → Model |
+| `ANTHROPIC_API_KEY` | Spørg Claude → API-nøgle |
 
 Indstillingerne gemmes krypteret med `APP_KEY` i `storage/app/plex-recommender.json`.
 

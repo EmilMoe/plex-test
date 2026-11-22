@@ -49,19 +49,22 @@
                 @endforeach
             </div>
 
-            <div class="pr-columns pr-columns-2">
-                <x-filament::section heading="Det du har set mest" description="Gensyn, sete afsnit og din egen bedømmelse tæller med.">
-                    <ol class="pr-list">
-                        @forelse ($p['most_engaged_titles'] as $t)
-                            <li>
-                                <span>{{ $t['title'] }} <span class="pr-muted">{{ $t['year'] }}</span></span>
-                                <span class="pr-muted">{{ $t['type'] === 'show' ? $t['episodes_watched'].' afsnit' : ($t['view_count'] > 1 ? $t['view_count'].' gange' : 'set') }}</span>
-                            </li>
-                        @empty
-                            <li class="pr-muted">Ingen historik endnu.</li>
-                        @endforelse
-                    </ol>
-                </x-filament::section>
+            <div class="pr-columns">
+                @foreach ($p['most_watched'] as $listType => $titles)
+                    <x-filament::section :heading="$listType === 'show' ? 'Serier du har set mest' : 'Film du har set mest'"
+                        :description="$listType === 'show' ? 'Sete afsnit, hvor langt du er nået, og din egen bedømmelse.' : 'Gensyn og din egen bedømmelse tæller med.'">
+                        <ol class="pr-list">
+                            @forelse ($titles as $t)
+                                <li>
+                                    <span>{{ $t['title'] }} <span class="pr-muted">{{ $t['year'] }}</span></span>
+                                    <span class="pr-muted">{{ $t['type'] === 'show' ? $t['episodes_watched'].' afsnit' : ($t['view_count'] > 1 ? $t['view_count'].' gange' : 'set') }}</span>
+                                </li>
+                            @empty
+                                <li class="pr-muted">Ingen historik endnu.</li>
+                            @endforelse
+                        </ol>
+                    </x-filament::section>
+                @endforeach
                 <x-filament::section heading="Lige nu" description="Det du har set de sidste 90 dage, nyeste først.">
                     <ol class="pr-list">
                         @forelse ($p['recent'] as $t)

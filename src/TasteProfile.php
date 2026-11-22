@@ -28,8 +28,9 @@ class TasteProfile
      * How strongly a watched item says something about your taste.
      *
      * - Movies: rewatches count, with diminishing returns.
-     * - Shows: more episodes and higher completion count more; a show dropped
-     *   after two episodes is a weak signal.
+     * - Shows: more episodes and higher completion count more, capped so a long
+     *   show weighs about as much as a much-loved movie; a show dropped after
+     *   two episodes is a weak signal.
      * - Your own star rating scales the weight.
      * - Recent viewing counts more than viewing from years ago.
      */
@@ -38,8 +39,12 @@ class TasteProfile
         if (! $item->watched()) {
             return 0.0;
         }
+        // Movies: 1 view = 2, 2 views ≈ 3.2, 3 views = 4.
+        // Shows are put on the same scale, so a show isn't worth more just because
+        // it has many episodes: a finished show with 10+ episodes = 4 (like a movie
+        // seen three times), a show dropped after 2 of 20 episodes ≈ 1.
         $w = $item->type === MediaItem::SHOW
-            ? log(1 + $item->viewedLeafCount, 2) * (0.5 + $item->completion())
+            ? 2.0 * min(1.0, log(1 + $item->viewedLeafCount, 2) / log(11, 2)) * (1.0 + $item->completion())
             : log(1 + $item->viewCount, 2) * 2.0;
 
         if ($item->userRating !== null) {

@@ -2,6 +2,7 @@
     $cards = $this->cards();
     $genres = $this->genres();
     $connected = $this->isConnected();
+    $claude = $source === 'claude' ? $this->claudeResult() : null;
 @endphp
 <x-filament-panels::page>
     <div class="pr-root" wire:init="load">
@@ -13,6 +14,7 @@
             <div class="pr-segmented" role="tablist" aria-label="Kilde">
                 <button type="button" wire:click="$set('source', 'library')" @class(['pr-seg', 'is-active' => $source === 'library'])>Fra dit bibliotek</button>
                 <button type="button" wire:click="$set('source', 'new')" @class(['pr-seg', 'is-active' => $source === 'new'])>Værd at skaffe</button>
+                <button type="button" wire:click="$set('source', 'claude')" @class(['pr-seg', 'is-active' => $source === 'claude'])>Spørg Claude</button>
             </div>
             @if ($genres)
                 <select class="pr-select" wire:model.live="genre" aria-label="Genre">
@@ -28,12 +30,13 @@
             <details class="pr-explain">
                 <summary>Sådan finder vi forslag</summary>
                 <div class="pr-explain-body">
-                    <p>Forslagene beregnes direkte ud fra din Plex-historik. Der bruges ingen AI.</p>
+                    <p>"Fra dit bibliotek" og "Værd at skaffe" beregnes direkte ud fra din Plex-historik uden AI.</p>
                     <ol>
                         <li><strong>Din smagsprofil.</strong> Alt du har set, vægtes efter hvor meget du har engageret dig: genset film og serier du har set mange afsnit af tæller mere, dine egne stjerner i Plex hæver eller sænker vægten, og nyere visninger tæller mere end gamle. Ud fra det får genrer, instruktører, skuespillere og årtier en vægt. Se den under <em>Smagsprofil</em>.</li>
                         <li><strong>Fra dit bibliotek</strong> giver usete titler point for genre (op til 3), instruktør (op til 1,5), skuespillere (op til 1,5), årti (op til 0,4) og bedømmelse (op til 0,8).</li>
                         <li><strong>Værd at skaffe</strong> tager dine mest sete titler og henter TMDB's lignende titler. En titel der går igen hos flere af dine favoritter, scorer højere. Derefter ganges der med hvor godt genren passer, og med bedømmelsen på TMDB. Titler du allerede har, sorteres fra.</li>
                     </ol>
+                    <p><strong>Spørg Claude</strong> sender din smagsprofil og nylige historik til Claude (via Claude Code på denne computer eller en API-nøgle), som skriver personlige forslag med begrundelse. Forslagene tjekkes mod dit bibliotek, så du ikke får noget du har set.</p>
                     <p>Klik på <em>Hvorfor?</em> på et kort for at se præcis hvor pointene kommer fra.</p>
                 </div>
             </details>
@@ -56,6 +59,40 @@
                     <div class="pr-card pr-skeleton"><div class="pr-poster"></div><div class="pr-body"><div class="pr-line"></div><div class="pr-line short"></div></div></div>
                 @endfor
             </div>
+        @elseif ($source === 'claude' && ! $this->claudeEnabled())
+            <x-filament::section>
+                <div class="pr-empty">
+                    <x-filament::icon icon="heroicon-o-chat-bubble-left-right" class="pr-empty-icon" />
+                    <h3>Claude er slået fra</h3>
+                    <p>Slå "Spørg Claude" til under indstillingerne. Kører appen på samme computer som Claude Code, kræver det ingen API-nøgle.</p>
+                    @if ($url = $this->settingsUrl())
+                        <x-filament::button tag="a" :href="$url">Åbn indstillinger</x-filament::button>
+                    @endif
+                </div>
+            </x-filament::section>
+        @elseif ($source === 'claude' && ! $cards)
+            <x-filament::section>
+                <form class="pr-claude" wire:submit="askClaude">
+                    <div class="pr-claude-row">
+                        <input type="text" class="pr-input" wire:model="wish" maxlength="300"
+                               placeholder="Hvad er du i humør til? F.eks. &quot;noget let og dansk&quot; (valgfrit)">
+                        <x-filament::button type="submit" icon="heroicon-o-sparkles" wire:loading.attr="disabled" wire:target="askClaude">
+                            Få forslag fra Claude
+                        </x-filament::button>
+                    </div>
+                    <div class="pr-claude-status" wire:loading.flex wire:target="askClaude">
+                        <x-filament::loading-indicator class="pr-spinner" />
+                        <span>Claude tænker… Det tager typisk 20–60 sekunder.</span>
+                    </div>
+                    <div wire:loading.remove wire:target="askClaude">
+                        @if ($claudeError)
+                            <p class="pr-claude-error">{{ $claudeError }}</p>
+                        @else
+                            <p class="pr-muted">Claude får din smagsprofil, det du har set for nylig, og hvad der ligger uset i dit bibliotek, og skriver personlige forslag med begrundelse.</p>
+                        @endif
+                    </div>
+                </form>
+            </x-filament::section>
         @elseif ($source === 'new' && ! $this->hasTmdb())
             <x-filament::section>
                 <div class="pr-empty">
@@ -84,7 +121,25 @@
                 </div>
             </x-filament::section>
         @else
-            <div class="pr-grid" wire:loading.class="pr-dim">
+            @if ($source === 'claude' && $claude)
+                <form class="pr-claude pr-claude-bar" wire:submit="askClaude(true)">
+                    <div class="pr-claude-row">
+                        <input type="text" class="pr-input" wire:model="wish" maxlength="300" placeholder="Hvad er du i humør til? (valgfrit)">
+                        <x-filament::button type="submit" color="gray" icon="heroicon-o-arrow-path" wire:loading.attr="disabled" wire:target="askClaude">
+                            Spørg igen
+                        </x-filament::button>
+                    </div>
+                    <p class="pr-muted" wire:loading.remove wire:target="askClaude">
+                        Fra {{ $claude['driver'] }} {{ \Illuminate\Support\Carbon::createFromTimestamp($claude['asked_at'])->locale('da')->diffForHumans() }}.
+                        @if ($claudeError) <span class="pr-claude-error">{{ $claudeError }}</span> @endif
+                    </p>
+                    <div class="pr-claude-status" wire:loading.flex wire:target="askClaude">
+                        <x-filament::loading-indicator class="pr-spinner" />
+                        <span>Claude tænker… Det tager typisk 20–60 sekunder.</span>
+                    </div>
+                </form>
+            @endif
+            <div class="pr-grid" wire:loading.class="pr-dim" wire:target="type,source,genre">
                 @foreach ($cards as $card)
                     <article class="pr-card">
                         <div class="pr-poster">
@@ -93,7 +148,7 @@
                                 <img src="{{ $card['poster'] }}" alt="" loading="lazy" onerror="this.remove()">
                             @endif
                             @if ($card['badge'])
-                                <span class="pr-badge" title="Bedømmelse på TMDB">★ {{ $card['badge'] }}</span>
+                                <span class="pr-badge" title="{{ $card['badge_title'] ?? 'Bedømmelse på TMDB' }}">{{ isset($card['badge_title']) ? '' : '★ ' }}{{ $card['badge'] }}</span>
                             @endif
                             @if (! empty($card['progress']))
                                 <span class="pr-badge" title="Sete afsnit">{{ $card['progress'] }}</span>
