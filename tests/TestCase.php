@@ -49,6 +49,7 @@ abstract class TestCase extends Orchestra
     {
         @unlink(sys_get_temp_dir().'/plex-recommender-test-'.getmypid().'.json');
         (new \Illuminate\Filesystem\Filesystem)->deleteDirectory(sys_get_temp_dir().'/plex-recommender-cache-'.getmypid());
+        Fixtures::$history = null;
         parent::tearDown();
     }
 

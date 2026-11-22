@@ -114,7 +114,7 @@ class RecommenderService
         return $this->profile($type)->summary($topN);
     }
 
-    /** Most watched: by engagement (all time), or by plays within the last $days days. */
+    /** Most watched: by engagement (all time), or what was watched within the last $days days (most recent first). */
     public function mostWatched(string $type, int $limit = 20, ?int $days = null): array
     {
         $type = self::normalizeType($type);
@@ -126,21 +126,28 @@ class RecommenderService
         }
 
         $history = $this->plex->history(5000, time() - $days * 86400, $this->settings->accountId());
-        $plays = $last = [];
+        $plays = $last = $titles = [];
         foreach ($history as $h) {
-            $key = match (true) {
-                $type === MediaItem::MOVIE && ($h['type'] ?? '') === 'movie' => (string) ($h['ratingKey'] ?? ''),
-                $type === MediaItem::SHOW && ($h['type'] ?? '') === 'episode' => (string) ($h['grandparentRatingKey']
-                    ?? basename((string) ($h['grandparentKey'] ?? ''))),
-                default => null,
+            [$key, $title] = match (true) {
+                $type === MediaItem::MOVIE && ($h['type'] ?? '') === 'movie' => [
+                    (string) ($h['ratingKey'] ?? basename((string) ($h['key'] ?? ''))),
+                    ['title' => $h['title'] ?? null, 'year' => $h['year'] ?? null],
+                ],
+                $type === MediaItem::SHOW && ($h['type'] ?? '') === 'episode' => [
+                    (string) ($h['grandparentRatingKey'] ?? basename((string) ($h['grandparentKey'] ?? ''))),
+                    ['title' => $h['grandparentTitle'] ?? null, 'year' => null],
+                ],
+                default => [null, null],
             };
             if (! $key) {
                 continue;
             }
             $plays[$key] = ($plays[$key] ?? 0) + 1;
             $last[$key] = max($last[$key] ?? 0, (int) ($h['viewedAt'] ?? 0));
+            $titles[$key] ??= $title;
         }
-        arsort($plays);
+        // Most recently watched first, so what you're watching right now is always on top.
+        uksort($plays, fn ($a, $b) => $last[$b] <=> $last[$a]);
 
         $byKey = [];
         foreach ($this->items($type) as $i) {
@@ -149,8 +156,12 @@ class RecommenderService
 
         $out = [];
         foreach (array_slice($plays, 0, $limit, true) as $key => $n) {
-            $entry = isset($byKey[$key]) ? $byKey[$key]->brief() : ['rating_key' => (string) $key];
-            $out[] = [...$entry, 'plays_in_period' => $n, 'last_viewed' => date('Y-m-d', $last[$key])];
+            // Fall back to the title from the history entry when the library cache
+            // doesn't know the item (e.g. added since the cache was filled).
+            $entry = isset($byKey[$key])
+                ? $byKey[$key]->brief()
+                : array_filter(['rating_key' => (string) $key, 'type' => $type, ...$titles[$key]], fn ($v) => $v !== null);
+            $out[] = [...$entry, 'plays_in_period' => $n, 'last_viewed' => date('Y-m-d', $last[$key]), 'last_viewed_at' => $last[$key]];
         }
 
         return $out;

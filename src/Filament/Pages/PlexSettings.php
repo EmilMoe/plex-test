@@ -206,7 +206,7 @@ class PlexSettings extends Page
             'account_id' => $data['account_id'] ?: null,
             'verify_ssl' => (bool) $data['verify_ssl'],
             'cache_ttl' => max(0, (int) ($data['cache_minutes'] ?? 10)) * 60,
-            'recency_half_life_days' => max(1, (int) ($data['recency_half_life_days'] ?? 365)),
+            'recency_half_life_days' => max(1, (int) ($data['recency_half_life_days'] ?? 180)),
         ]);
         app(RecommenderService::class)->refresh();
 

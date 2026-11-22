@@ -5,6 +5,7 @@ namespace EmilMoe\PlexRecommender\Tests\Feature;
 use EmilMoe\PlexRecommender\Data\MediaItem;
 use EmilMoe\PlexRecommender\Facades\PlexRecommender;
 use EmilMoe\PlexRecommender\RecommenderService;
+use EmilMoe\PlexRecommender\TasteProfile;
 use EmilMoe\PlexRecommender\Tests\Fixtures;
 use EmilMoe\PlexRecommender\Tests\TestCase;
 use Illuminate\Http\Client\Request;
@@ -98,6 +99,35 @@ class RecommenderTest extends TestCase
         $this->assertSame('Severance', $recent[0]['title']);
         $this->assertSame(2, $recent[0]['plays_in_period']);
         $this->assertStringStartsWith('Severance S02E10', $this->svc()->recentHistory(2)[0]['title']);
+    }
+
+    public function test_recent_is_newest_first_and_includes_titles_missing_from_library(): void
+    {
+        $now = time();
+        Fixtures::$history = [
+                // Just started a show that isn't in the (cached) library yet
+                ['type' => 'episode', 'grandparentKey' => '/library/metadata/99', 'grandparentTitle' => 'Feltet', 'viewedAt' => $now - 60],
+                ['type' => 'episode', 'grandparentKey' => '/library/metadata/99', 'grandparentTitle' => 'Feltet', 'viewedAt' => $now - 120],
+                ['type' => 'episode', 'grandparentRatingKey' => '11', 'viewedAt' => $now - 86400 * 20],
+                ['type' => 'episode', 'grandparentRatingKey' => '11', 'viewedAt' => $now - 86400 * 21],
+                ['type' => 'episode', 'grandparentRatingKey' => '11', 'viewedAt' => $now - 86400 * 22],
+        ];
+
+        $recent = $this->svc()->mostWatched('show', 20, 90);
+        $this->assertSame(['Feltet', 'Friends'], array_column($recent, 'title'));
+        $this->assertSame(2, $recent[0]['plays_in_period']);
+    }
+
+    public function test_old_favourites_fade_behind_recent_viewing(): void
+    {
+        $now = time();
+        $oldFavourite = new MediaItem('1', 'Old', MediaItem::MOVIE, viewCount: 3, lastViewedAt: $now - 86400 * 365 * 4);
+        $newShow = new MediaItem('2', 'New', MediaItem::SHOW, leafCount: 8, viewedLeafCount: 2, lastViewedAt: $now - 3600);
+
+        $this->assertGreaterThan(
+            TasteProfile::engagementWeight($oldFavourite, $now),
+            TasteProfile::engagementWeight($newShow, $now),
+        );
     }
 
     public function test_library_is_cached(): void

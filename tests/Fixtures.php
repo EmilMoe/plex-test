@@ -6,6 +6,9 @@ use Illuminate\Support\Facades\Http;
 
 class Fixtures
 {
+    /** Override the Plex watch history returned by the fake server (null = default). */
+    public static ?array $history = null;
+
     public static function movie(int $key, string $title, int $year, array $genres, int $views = 0, array $directors = [], array $actors = [], ?int $tmdb = null, ?float $rating = null): array
     {
         return array_filter([
@@ -63,13 +66,13 @@ class Fixtures
                 ['key' => '1', 'title' => 'Film', 'type' => 'movie'],
                 ['key' => '2', 'title' => 'Serier', 'type' => 'show'],
             ]]),
-            'plex.test:32400/status/sessions/history/all*' => $mc(['totalSize' => 4, 'Metadata' => [
+            'plex.test:32400/status/sessions/history/all*' => fn () => $mc(['totalSize' => count($h = self::$history ?? [
                 ['type' => 'episode', 'grandparentRatingKey' => '10', 'grandparentTitle' => 'Severance',
                     'parentIndex' => 2, 'index' => 10, 'title' => 'Cold Harbor', 'viewedAt' => $now - 100],
                 ['type' => 'episode', 'grandparentRatingKey' => '10', 'viewedAt' => $now - 200],
                 ['type' => 'episode', 'grandparentRatingKey' => '11', 'viewedAt' => $now - 300],
                 ['type' => 'movie', 'ratingKey' => '1', 'title' => 'Blade Runner 2049', 'year' => 2017, 'viewedAt' => $now - 400],
-            ]]),
+            ]), 'Metadata' => $h]),
             'api.themoviedb.org/3/genre/*' => Http::response(['genres' => [
                 ['id' => 878, 'name' => 'Science Fiction'], ['id' => 18, 'name' => 'Drama'],
                 ['id' => 10749, 'name' => 'Romance'], ['id' => 35, 'name' => 'Comedy'],

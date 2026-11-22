@@ -56,6 +56,6 @@ return [
 
     'profile' => [
         // Halveringstid i dage: hvor hurtigt gamle visninger mister betydning.
-        'recency_half_life_days' => 365,
+        'recency_half_life_days' => 180,
     ],
 ];

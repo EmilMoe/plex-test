@@ -62,12 +62,12 @@
                         @endforelse
                     </ol>
                 </x-filament::section>
-                <x-filament::section heading="Lige nu" description="Mest afspillet de sidste 90 dage.">
+                <x-filament::section heading="Lige nu" description="Det du har set de sidste 90 dage, nyeste først.">
                     <ol class="pr-list">
                         @forelse ($p['recent'] as $t)
                             <li>
                                 <span>{{ $t['title'] }} <span class="pr-muted">{{ $t['year'] ?? '' }}</span></span>
-                                <span class="pr-muted">{{ $t['plays_in_period'] }} {{ $t['plays_in_period'] === 1 ? 'afspilning' : 'afspilninger' }}</span>
+                                <span class="pr-muted">{{ $t['plays_in_period'] }} {{ $t['type'] === 'show' ? 'afsnit' : ($t['plays_in_period'] === 1 ? 'gang' : 'gange') }} · {{ \Illuminate\Support\Carbon::createFromTimestamp($t['last_viewed_at'])->locale('da')->diffForHumans() }}</span>
                             </li>
                         @empty
                             <li class="pr-muted">Intet set de sidste 90 dage.</li>

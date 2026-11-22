@@ -33,7 +33,7 @@ class TasteProfile
      * - Your own star rating scales the weight.
      * - Recent viewing counts more than viewing from years ago.
      */
-    public static function engagementWeight(MediaItem $item, ?int $now = null, int $halfLifeDays = 365): float
+    public static function engagementWeight(MediaItem $item, ?int $now = null, int $halfLifeDays = 180): float
     {
         if (! $item->watched()) {
             return 0.0;
@@ -47,14 +47,16 @@ class TasteProfile
         }
         if ($item->lastViewedAt) {
             $ageDays = max(0, (($now ?? time()) - $item->lastViewedAt) / 86400);
-            $w *= 0.35 + 0.65 * 0.5 ** ($ageDays / $halfLifeDays);
+            // Small floor so an old favourite never fully disappears, but no longer
+            // dominates: something watched 3 half-lives ago counts ~20% of a fresh view.
+            $w *= 0.1 + 0.9 * 0.5 ** ($ageDays / $halfLifeDays);
         }
 
         return $w;
     }
 
     /** @param  iterable<MediaItem>  $items */
-    public static function build(iterable $items, ?int $now = null, int $halfLifeDays = 365): self
+    public static function build(iterable $items, ?int $now = null, int $halfLifeDays = 180): self
     {
         $genres = $directors = $actors = $decades = $weighted = [];
 

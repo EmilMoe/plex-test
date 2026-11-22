@@ -139,7 +139,7 @@ class Settings
 
     public function halfLifeDays(): int
     {
-        return max(1, (int) $this->get('recency_half_life_days', 365));
+        return max(1, (int) $this->get('recency_half_life_days', 180));
     }
 
     public function minVotes(): int

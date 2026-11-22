@@ -62,9 +62,9 @@ class TasteProfile extends Page
             $types = $this->type ? [$this->type] : ['movie', 'show'];
             $recent = [];
             foreach ($types as $t) {
-                array_push($recent, ...$svc->mostWatched($t, 6, 90));
+                array_push($recent, ...$svc->mostWatched($t, 8, 90));
             }
-            usort($recent, fn ($a, $b) => $b['plays_in_period'] <=> $a['plays_in_period']);
+            usort($recent, fn ($a, $b) => $b['last_viewed_at'] <=> $a['last_viewed_at']);
             $profile['recent'] = array_slice(array_filter($recent, fn ($r) => isset($r['title'])), 0, 8);
 
             return $profile;
