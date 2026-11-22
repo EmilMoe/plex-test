@@ -43,8 +43,8 @@ class ClaudeAdvisor
             ],
             'questions' => [
                 'type' => 'array',
-                'description' => '2-3 korte opklarende spørgsmål med 2-4 svarmuligheder, tilpasset netop denne brugers smag, der kan hjælpe med at ramme bedre næste gang. '
-                    .'Spørg IKKE om stemning, længde eller land (det spørges der allerede om).',
+                'description' => '2-3 korte opklarende spørgsmål med 2-4 svarmuligheder om indhold og smag, tilpasset netop denne bruger. '
+                    .'Spørg IKKE om stemning, længde eller land (det spørges der allerede om), og aldrig om undertekster, sprog, kvalitet eller tilgængelighed.',
                 'items' => [
                     'type' => 'object',
                     'properties' => [
@@ -476,7 +476,9 @@ class ClaudeAdvisor
         - Begrundelsen skal nævne konkrete fællestræk med titler brugeren har set (f.eks. "samme kolde, nordiske tone som Dark"),
           ikke generiske vendinger som "du kan lide drama". Dansk, højst 2 sætninger.
         - Stil til sidst 2-3 korte opklarende spørgsmål (questions), som ville hjælpe dig med at ramme endnu bedre næste gang,
-          f.eks. om et tema, en periode eller en stil du ser i historikken. Svarmulighederne skal være korte.
+          f.eks. om et tema, en periode, en stil eller en tone du ser i historikken. Svarmulighederne skal være korte.
+          Spørg kun om indhold og smag, som du selv kan tage højde for. Spørg aldrig om praktiske ting du ikke kan vide eller
+          kontrollere: undertekster, dubbing, sprogspor, billed- eller lydkvalitet, streamingtjenester, pris eller tilgængelighed.
         - Svar kun med JSON efter det givne schema.
         TXT;
     }

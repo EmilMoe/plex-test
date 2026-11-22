@@ -151,7 +151,7 @@
             </form>
 
             @php($history = $this->history())
-            @if (count($history) > 1)
+            @if ($history)
                 <div class="pr-history">
                     <span class="pr-question-label">Tidligere søgninger</span>
                     <div class="pr-history-list">

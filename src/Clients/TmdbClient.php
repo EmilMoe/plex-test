@@ -80,10 +80,16 @@ class TmdbClient
 
         return $this->get('/'.self::kind($type)."/{$tmdbId}", [
             'language' => $this->language,
-            'append_to_response' => 'videos,credits',
+            'append_to_response' => 'videos,credits,external_ids',
             // Trailers are often only in English: accept the user's language, English and neutral.
             'include_video_language' => implode(',', array_unique([$lang, 'en', 'null'])),
         ]);
+    }
+
+    /** Overview (plot) in another language, for when the configured one has none. */
+    public function overview(string $type, string $tmdbId, string $language = 'en-US'): string
+    {
+        return (string) ($this->get('/'.self::kind($type)."/{$tmdbId}", ['language' => $language])['overview'] ?? '');
     }
 
     /** Resolve a TMDB id from an IMDb or TVDB id (for items lacking a tmdb guid). */

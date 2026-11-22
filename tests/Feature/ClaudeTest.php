@@ -193,6 +193,7 @@ class ClaudeTest extends TestCase
         Livewire::test(Recommendations::class)
             ->call('load')
             ->call('autoAskClaude')
+            ->assertSee('Tidligere søgninger')
             ->call('openDetail', 0)
             ->assertDispatched('open-modal', id: 'pr-detail')
             ->assertSet('detail.trailer', 'trailerDA') // Danish official trailer preferred over English teaser
@@ -200,7 +201,9 @@ class ClaudeTest extends TestCase
             ->assertSee('Se trailer')
             ->assertSee('To drenge og deres fædre.')
             ->assertSee('Samme moralske tyngde.')
-            ->assertSee('1 t 53 min');
+            ->assertSee('1 t 53 min')
+            ->assertSee('Danmark')
+            ->assertSee('https://www.imdb.com/title/tt1340107/', false);
     }
 
     public function test_runs_in_the_queue_with_progress_so_you_can_leave_the_page(): void

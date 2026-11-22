@@ -314,7 +314,7 @@ class RecommenderService
             return null;
         }
 
-        return $this->cache->remember("plex-recommender:details:{$type}:{$tmdbId}:".$this->settings->language(), now()->addWeek(), function () use ($tmdb, $type, $tmdbId) {
+        return $this->cache->remember("plex-recommender:details:v2:{$type}:{$tmdbId}:".$this->settings->language(), now()->addWeek(), function () use ($tmdb, $type, $tmdbId) {
             $d = $tmdb->details($type, $tmdbId);
             $date = $d['release_date'] ?? $d['first_air_date'] ?? '';
             $videos = array_values(array_filter($d['videos']['results'] ?? [], fn ($v) => ($v['site'] ?? '') === 'YouTube' && ! empty($v['key'])));
@@ -334,14 +334,16 @@ class RecommenderService
                 'original_title' => $d['original_title'] ?? $d['original_name'] ?? null,
                 'year' => ctype_digit(substr($date, 0, 4)) ? (int) substr($date, 0, 4) : null,
                 'tagline' => $d['tagline'] ?? null,
-                'overview' => $d['overview'] ?? '',
+                // Many smaller titles have no Danish plot on TMDB: fall back to English.
+                'overview' => ($d['overview'] ?? '') !== '' ? $d['overview'] : rescue(fn () => $tmdb->overview($type, $tmdbId), '', false),
                 'genres' => array_column($d['genres'] ?? [], 'name'),
                 'runtime' => $d['runtime'] ?? (($d['episode_run_time'] ?? [])[0] ?? null),
                 'seasons' => $d['number_of_seasons'] ?? null,
                 'episodes' => $d['number_of_episodes'] ?? null,
-                'countries' => array_column($d['production_countries'] ?? [], 'name') ?: ($d['origin_country'] ?? []),
+                'countries' => $this->countryNames(array_column($d['production_countries'] ?? [], 'iso_3166_1') ?: ($d['origin_country'] ?? []), array_column($d['production_countries'] ?? [], 'name')),
                 'directors' => array_values(array_unique($directors)),
-                'cast' => array_slice(array_column($d['credits']['cast'] ?? [], 'name'), 0, 8),
+                'cast' => array_slice(array_column($d['credits']['cast'] ?? [], 'name'), 0, 5),
+                'imdb_id' => $d['imdb_id'] ?? $d['external_ids']['imdb_id'] ?? null,
                 'tmdb_rating' => $d['vote_average'] ?? null,
                 'votes' => $d['vote_count'] ?? null,
                 'poster' => ! empty($d['poster_path']) ? 'https://image.tmdb.org/t/p/w500'.$d['poster_path'] : null,
@@ -350,6 +352,17 @@ class RecommenderService
                 'url' => 'https://www.themoviedb.org/'.TmdbClient::kind($type)."/{$tmdbId}",
             ];
         });
+    }
+
+    /** Country names in the configured language (ISO codes via intl), falling back to TMDB's English names. */
+    protected function countryNames(array $codes, array $fallback): array
+    {
+        if (! $codes || ! class_exists(\Locale::class)) {
+            return $fallback;
+        }
+        $lang = substr($this->settings->language(), 0, 2);
+
+        return array_values(array_map(fn ($c) => \Locale::getDisplayRegion('-'.$c, $lang) ?: $c, $codes));
     }
 
     /** Link that opens a library item in Plex Web, when the server id is known. */
