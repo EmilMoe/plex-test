@@ -1,0 +1,16 @@
+[project]
+name = "plex-recommender"
+version = "0.1.0"
+description = "Anbefalinger af film og serier ud fra din Plex-historik, med Claude Code (MCP)"
+requires-python = ">=3.10"
+dependencies = ["requests>=2.31", "mcp>=1.2"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+plex-recommender = "plex_recommender.__main__:main"
+plex-recommender-mcp = "plex_recommender.server:main"
+
+[tool.setuptools]
+packages = ["plex_recommender"]
