@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "plex": {
-      "type": "stdio",
-      "command": "python3",
-      "args": ["-m", "plex_recommender.server"]
-    }
-  }
-}

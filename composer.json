@@ -1,0 +1,43 @@
+{
+    "name": "emilmoe/plex-recommender",
+    "description": "Laravel-pakke der læser din Plex-historik og anbefaler film og serier du ikke har set – med Claude Code-integration via MCP.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["laravel", "plex", "recommendations", "mcp", "claude"],
+    "require": {
+        "php": "^8.2",
+        "illuminate/console": "^12.0|^13.0",
+        "illuminate/http": "^12.0|^13.0",
+        "illuminate/support": "^12.0|^13.0",
+        "laravel/mcp": "^1.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^10.0|^11.0",
+        "phpunit/phpunit": "^11.0|^12.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "EmilMoe\\PlexRecommender\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "EmilMoe\\PlexRecommender\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "EmilMoe\\PlexRecommender\\PlexRecommenderServiceProvider"
+            ],
+            "aliases": {
+                "PlexRecommender": "EmilMoe\\PlexRecommender\\Facades\\PlexRecommender"
+            }
+        }
+    },
+    "scripts": {
+        "test": "phpunit"
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}

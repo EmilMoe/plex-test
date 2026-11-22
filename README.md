@@ -1,106 +1,139 @@
-# Plex-anbefaler med Claude Code
+# Plex Recommender til Laravel
 
-Læser hvad du har **set mest** i Plex og hvad du **har** i dit bibliotek, bygger en
-smagsprofil og finder relevante film og serier du **ikke har set**, både fra dit eget
-bibliotek og nye titler du ikke har endnu. Claude Code bruger det via en MCP-server.
+En Laravel-pakke der læser hvad du har **set mest** i Plex og hvad du **har** i dit
+bibliotek, bygger en smagsprofil og finder relevante film og serier du **ikke har set**:
+både fra dit eget bibliotek og nye titler du ikke har endnu. Claude Code bruger det via
+en MCP-server (`laravel/mcp`), så du bare kan skrive `/anbefal` i Claude Code.
+
+## Installation
+
+Pakken er ikke på Packagist. Tilføj repoet i dit projekts `composer.json`:
+
+```json
+"repositories": [
+    { "type": "vcs", "url": "https://github.com/EmilMoe/plex-test" }
+]
+```
+
+```bash
+composer require emilmoe/plex-recommender:dev-main     # eller dev-<branch>
+php artisan plex:install
+```
+
+`plex:install` gør tre ting:
+1. publicerer `config/plex-recommender.php`
+2. tilføjer MCP-serveren `plex` til `.mcp.json` (`php artisan mcp:start plex`)
+3. lægger slash-kommandoerne `/anbefal` og `/smagsprofil` i `.claude/commands/`
+
+Tilføj til `.env` (se `.env.example`):
+
+```dotenv
+PLEX_URL=http://192.168.1.10:32400
+PLEX_TOKEN=xxxxxxxx
+TMDB_API_KEY=xxxxxxxx      # valgfri, men anbefalet
+```
+
+Test forbindelsen: `php artisan plex overview`
+
+**Plex-token:** åbn Plex Web, vælg en vilkårlig film → `⋯` → *Get Info* → *View XML*.
+URL'en indeholder `X-Plex-Token=...`.
+
+**TMDB (valgfri):** opret en gratis konto på themoviedb.org → Settings → API. Både
+"API Key" (v3) og "API Read Access Token" virker. Uden TMDB virker alt undtagen
+`recommend-new`, og Claude foreslår så selv titler og tjekker dem med `check-owned`.
+
+Krav: PHP 8.2+, Laravel 12 eller 13.
 
 ## Sådan virker det
 
-1. **Indsamling:** henter alle film og serier fra dine Plex-biblioteker (antal visninger,
-   sete afsnit, din egen rating, genrer, instruktører, skuespillere, TMDB/IMDb-id'er) og
-   din afspilningshistorik.
+1. **Indsamling:** henter alle film og serier fra dine Plex-biblioteker (visninger, sete
+   afsnit, din rating, genrer, instruktører, skuespillere, TMDB/IMDb/TVDB-id'er) og din
+   afspilningshistorik. Data caches i 10 minutter i Laravel-cachen.
 2. **Smagsprofil:** hver set titel får en vægt:
    - film: antal gensyn (aftagende effekt)
-   - serier: antal sete afsnit × hvor meget af serien du har gennemført, så en serie du
-     droppede efter 2 afsnit tæller lidt
+   - serier: sete afsnit × hvor meget du har gennemført, så en serie du droppede efter 2
+     afsnit tæller lidt
    - din egen stjerne-rating skalerer vægten
-   - nyere visninger tæller mere (halveringstid 1 år)
+   - nyere visninger tæller mere (halveringstid 1 år, kan ændres i config)
 
    Vægtene lægges sammen pr. genre, instruktør, skuespiller og årti.
 3. **Anbefalinger:**
-   - `unwatched_in_library`: usete titler du *ejer*, scoret mod profilen, med begrundelse
-   - `recommend_new`: titler du *ikke ejer*, hentet fra TMDB-anbefalinger til dine mest
-     sete titler, rangeret efter hvor mange af dine favoritter der peger på dem, genre-match
-     og score. Titler du allerede har, filtreres fra.
-   - `check_owned`: Claude kan selv foreslå titler ud fra sin viden og tjekke dem mod dit
-     bibliotek, så du ikke får anbefalet noget du har set.
-
-## Opsætning
-
-```bash
-pip install -r requirements.txt        # requests + mcp
-cp .env.example .env                   # udfyld PLEX_URL og PLEX_TOKEN (+ evt. TMDB_API_KEY)
-python3 -m plex_recommender overview   # test forbindelsen
-```
-
-**Plex-token:** åbn Plex Web, vælg en vilkårlig film → `⋯` → *Get Info* → *View XML*.
-URL'en indeholder `X-Plex-Token=...`. (Se også Plex' guide "Finding an authentication token".)
-
-**TMDB (valgfri, anbefalet):** opret en gratis konto på themoviedb.org → Settings → API.
-Både "API Key" (v3) og "API Read Access Token" virker. Uden TMDB virker alt undtagen
-`recommend_new`, og Claude foreslår så selv titler og tjekker dem med `check_owned`.
+   - **Fra dit bibliotek:** usete titler du ejer, scoret mod profilen, med begrundelse
+   - **Værd at skaffe:** TMDB-anbefalinger til dine mest sete titler, rangeret efter hvor
+     mange af dine favoritter der peger på dem, genre-match og score. Titler du allerede
+     har, filtreres fra.
+   - **Claudes egne forslag:** tjekkes mod dit bibliotek med `check-owned`
 
 ## Brug med Claude Code
 
-Åbn projektet i Claude Code. `.mcp.json` registrerer MCP-serveren `plex` automatisk
-(godkend den første gang, eller kør `/mcp` for at se status). Derefter:
+Åbn projektet i Claude Code og godkend MCP-serveren `plex` (eller tjek med `/mcp`).
 
-| Kommando | Hvad den gør |
+| Kommando | |
 |---|---|
 | `/anbefal` | Anbefalinger af både film og serier |
 | `/anbefal serier mørk nordisk krimi` | Med type og stemning |
 | `/anbefal film noget let til fredag` | |
 | `/smagsprofil` | Analyse af din seersmag |
 
-Du kan også bare spørge frit, f.eks. *"Hvilke usete thrillere har jeg?"*, *"Hvad har jeg
-set mest de sidste 3 måneder?"* eller *"Har jeg set Severance, Dark og The Bear?"*.
-
-**Brug i andre projekter:** tilføj serveren globalt:
-```bash
-claude mcp add plex --scope user -e PLEX_URL=... -e PLEX_TOKEN=... -e TMDB_API_KEY=... \
-  -- python3 -m plex_recommender.server
-```
-(kræver `pip install -e .` i denne mappe, så pakken kan findes overalt).
+Eller spørg frit: *"Hvilke usete thrillere har jeg?"*, *"Hvad har jeg set mest de sidste
+3 måneder?"*, *"Har jeg set Severance, Dark og The Bear?"*
 
 ### MCP-værktøjer
 
 | Værktøj | Beskrivelse |
 |---|---|
-| `library_overview` | Biblioteker + antal sete/igangværende/usete |
-| `taste_profile` | Top-genrer, instruktører, skuespillere, årtier, mest sete titler |
-| `most_watched` | Mest sete, samlet eller de sidste N dage (`days`) |
-| `recent_history` | Seneste afspilninger |
-| `unwatched_in_library` | Usete titler du ejer, rangeret, med genre-filter |
-| `recommend_new` | Nye titler du ikke ejer (TMDB) |
-| `check_owned` | Tjek en liste titler mod biblioteket |
-| `search_library` | Søg på titel, genre, skuespiller, instruktør |
-| `refresh_cache` | Ryd cache (data caches i 10 min.) |
+| `library-overview` | Biblioteker + antal sete/igangværende/usete |
+| `taste-profile` | Top-genrer, instruktører, skuespillere, årtier, mest sete titler |
+| `most-watched` | Mest sete, samlet eller de sidste N dage (`days`) |
+| `recent-history` | Seneste afspilninger |
+| `unwatched-in-library` | Usete titler du ejer, rangeret, med genre-filter |
+| `recommend-new` | Nye titler du ikke ejer (TMDB) |
+| `check-owned` | Tjek en liste titler mod biblioteket |
+| `search-library` | Søg på titel, genre, skuespiller, instruktør |
+| `refresh-cache` | Ryd cachen |
 
-## CLI uden Claude
+Vil du selv styre registreringen (f.eks. også som web-server), så sæt
+`'mcp_handle' => null` i configen og registrér i `routes/ai.php`:
 
-```bash
-python3 -m plex_recommender profile
-python3 -m plex_recommender most-watched show --days 90
-python3 -m plex_recommender unwatched movie --genre Thriller
-python3 -m plex_recommender recommend show
-python3 -m plex_recommender check "Dark (2017)" "The Bear"
+```php
+use EmilMoe\PlexRecommender\Mcp\PlexServer;
+use Laravel\Mcp\Facades\Mcp;
+
+Mcp::local('plex', PlexServer::class);
+Mcp::web('/mcp/plex', PlexServer::class)->middleware('auth:sanctum');
 ```
 
-## Konfiguration (`.env`)
+## Artisan
 
-| Variabel | |
-|---|---|
-| `PLEX_URL` | f.eks. `http://192.168.1.10:32400` |
-| `PLEX_TOKEN` | dit Plex-token |
-| `TMDB_API_KEY` | valgfri, til `recommend_new` |
-| `RECOMMENDER_LANGUAGE` | sprog for TMDB-titler/resuméer, standard `da-DK` |
-| `PLEX_ACCOUNT_ID` | valgfri: kun én brugers historik |
-| `PLEX_VERIFY_SSL` | `false` ved selvsigneret https |
+```bash
+php artisan plex overview
+php artisan plex profile [movie|show]
+php artisan plex most-watched show --days=90
+php artisan plex history --limit=20
+php artisan plex unwatched movie --genre=Thriller
+php artisan plex recommend show
+php artisan plex check "Dark (2017)" "The Bear"
+php artisan plex refresh
+```
+Tilføj `--json` for rå JSON.
 
-Bemærk: sete-status og visninger kommer fra den Plex-konto, som tokenet tilhører.
+## I din egen kode
+
+```php
+use EmilMoe\PlexRecommender\Facades\PlexRecommender;
+
+PlexRecommender::tasteProfile();                       // smagsprofil
+PlexRecommender::unwatchedInLibrary('movie', 10);      // usete film du ejer
+PlexRecommender::recommendNew('show', 10);             // nye serier via TMDB
+PlexRecommender::checkOwned(['Dune (2021)']);
+PlexRecommender::mostWatched('show', 10, days: 30);
+```
+Eller injicér `EmilMoe\PlexRecommender\RecommenderService`. Det gør det nemt at bygge en
+side, et ugentligt mail-digest via scheduler osv. ovenpå.
 
 ## Tests
 
 ```bash
-pip install pytest && python3 -m pytest
+composer install && vendor/bin/phpunit
 ```
+Testene bruger `Http::fake()`, så de kræver hverken Plex eller TMDB.

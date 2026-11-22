@@ -1,6 +1,5 @@
+/vendor/
+composer.lock
+.phpunit.cache/
+.phpunit.result.cache
 .env
-__pycache__/
-*.pyc
-.pytest_cache/
-*.egg-info/
-.venv/

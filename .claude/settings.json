@@ -1,6 +1,0 @@
-{
-  "enabledMcpjsonServers": ["plex"],
-  "permissions": {
-    "allow": ["mcp__plex__*"]
-  }
-}
